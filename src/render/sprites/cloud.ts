@@ -38,43 +38,93 @@ interface Cloud {
 }
 
 /**
- * Cumulus outline: a flat base with rounded lumps piled on it, built as a per-column
- * height so the silhouette is genuinely round rather than a stack of boxes.
+ * Cumulus outline.
+ *
+ * Built as a per-column span between a top profile and a bottom profile rather than as
+ * stamped ellipses, because stamped shapes that overrun the sprite get clipped square
+ * at the edges. Every lump is inset so the silhouette tapers to nothing before the
+ * boundary.
+ *
+ * The base is *near* flat, as a real cumulus base is, but not dead level — a few
+ * shallow sags hang below the baseline so it undulates. The shaded underside follows
+ * that bottom profile at a proportional thickness rather than being cut off at a fixed
+ * row, which is what stops its edges going stair-steppy where the cloud thins out.
  */
 function shapeSprite(shape: number, widthPx: number): HTMLCanvasElement {
-  const heightPx = Math.max(3, Math.round(widthPx * 0.5))
+  const heightPx = Math.max(4, Math.round(widthPx * 0.5))
   return getSprite(`cloud:${shape}:${widthPx}`, widthPx, heightPx, (ctx, w, h) => {
     const random = mulberry32(shape * 7717 + 13)
 
-    const bumps: { x: number; r: number; h: number }[] = []
+    // --- Top profile: rounded lumps piled up ---------------------------------
+    const lumps: { cx: number; rx: number; ry: number }[] = []
     const count = 3 + Math.floor(random() * 3)
     for (let i = 0; i < count; i++) {
-      bumps.push({
-        x: w * ((i + 0.5) / count + (random() - 0.5) * 0.16),
-        r: w * (0.2 + random() * 0.22),
-        h: h * (0.55 + random() * 0.45),
+      const rx = w * (0.16 + random() * 0.12)
+      const ry = h * (0.52 + random() * 0.45)
+      // Positioned within [rx, w - rx] so the lump cannot run off the edge.
+      const spread = Math.max(0, w - 2 * rx)
+      const cx = rx + spread * ((i + 0.5) / count + (random() - 0.5) * 0.22)
+      lumps.push({ cx: Math.min(Math.max(cx, rx), w - rx), rx, ry })
+    }
+    // A broad shallow lump ties the others into one mass and closes the silhouette
+    // smoothly at both ends.
+    lumps.push({ cx: w * 0.5, rx: w * 0.5, ry: h * 0.42 })
+
+    // --- Bottom profile: a baseline with a few sags hanging below it ----------
+    const baseline = h * 0.86
+    const maxSag = h - baseline
+    const sags: { cx: number; rx: number; depth: number }[] = []
+    const sagCount = 2 + Math.floor(random() * 2)
+    for (let i = 0; i < sagCount; i++) {
+      sags.push({
+        cx: w * ((i + 0.5) / sagCount + (random() - 0.5) * 0.3),
+        rx: w * (0.14 + random() * 0.2),
+        depth: maxSag * (0.45 + random() * 0.55),
       })
     }
-    // A long shallow bump ties the others together into one mass.
-    bumps.push({ x: w * 0.5, r: w * 0.52, h: h * 0.5 })
 
-    const shadeFrom = h * 0.7
+    const cornerRadius = Math.min(w * 0.14, h * 0.45)
+
     for (let x = 0; x < w; x++) {
+      const px = x + 0.5
+
       let top = h
-      for (const bump of bumps) {
-        const dx = (x + 0.5 - bump.x) / bump.r
+      for (const lump of lumps) {
+        const dx = (px - lump.cx) / lump.rx
         if (dx <= -1 || dx >= 1) continue
-        top = Math.min(top, h - bump.h * Math.sqrt(1 - dx * dx))
+        top = Math.min(top, h - lump.ry * Math.sqrt(1 - dx * dx))
       }
-      const y = Math.round(top)
-      if (y >= h) continue
+
+      let bottom = baseline
+      for (const sag of sags) {
+        const dx = (px - sag.cx) / sag.rx
+        if (dx <= -1 || dx >= 1) continue
+        bottom = Math.max(bottom, baseline + sag.depth * Math.sqrt(1 - dx * dx))
+      }
+
+      // Round off the bottom corners: within `cornerRadius` of either end the base
+      // lifts along a circular arc.
+      const edge = Math.min(px, w - px)
+      if (edge < cornerRadius) {
+        const inset = cornerRadius - edge
+        const lift = cornerRadius - Math.sqrt(Math.max(0, cornerRadius * cornerRadius - inset * inset))
+        bottom = Math.min(bottom, h - lift)
+      }
+
+      const y0 = Math.round(top)
+      const y1 = Math.round(Math.min(bottom, h))
+      const column = y1 - y0
+      if (column <= 0) continue
 
       ctx.fillStyle = C.cloud
-      ctx.fillRect(x, y, 1, h - y)
-      if (h > shadeFrom) {
+      ctx.fillRect(x, y0, 1, column)
+
+      // Underside shading, thickness proportional to the column so it tapers away
+      // with the cloud instead of ending on a hard horizontal line.
+      if (column >= 3) {
+        const shade = Math.max(1, Math.round(column * 0.32))
         ctx.fillStyle = C.cloudShade
-        const shadeTop = Math.max(y, Math.round(shadeFrom))
-        ctx.fillRect(x, shadeTop, 1, h - shadeTop)
+        ctx.fillRect(x, y1 - shade, 1, shade)
       }
     }
   })

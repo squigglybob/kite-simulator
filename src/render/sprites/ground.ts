@@ -1,5 +1,6 @@
 import { fbm1D, hash1 } from '../../core/rng'
 import { C } from '../palette'
+import { getSprite } from '../spritecache'
 
 /**
  * Procedural coastline: distant headlands, sea, surf line and beach.
@@ -147,13 +148,23 @@ function drawBeach(
   }
 }
 
+/**
+ * The coastline is expensive to draw — the sand speckle and sea glints touch every
+ * pixel below the horizon and hash each one — but it only changes when the camera zoom
+ * moves the horizon, so it is rasterised once per layout and blitted thereafter.
+ * Redrawing it per frame cost roughly two thirds of the frame budget.
+ */
 export function drawGround(
   ctx: CanvasRenderingContext2D,
   layout: GroundLayout,
   scrollX: number,
 ): void {
-  drawHeadlands(ctx, layout, scrollX)
-  drawSea(ctx, layout)
-  drawSurf(ctx, layout, scrollX)
-  drawBeach(ctx, layout, scrollX)
+  const key = `ground:${layout.width}:${layout.height}:${layout.horizonY}:${layout.shoreY}:${Math.round(scrollX)}`
+  const sprite = getSprite(key, layout.width, layout.height, (target) => {
+    drawHeadlands(target, layout, scrollX)
+    drawSea(target, layout)
+    drawSurf(target, layout, scrollX)
+    drawBeach(target, layout, scrollX)
+  })
+  ctx.drawImage(sprite, 0, 0)
 }

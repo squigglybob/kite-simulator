@@ -59,11 +59,13 @@ const SECTIONS: Section[] = [
       { path: 'kite.rollInertia', label: 'roll inertia', min: 0.01, max: 0.5, step: 0.005 },
       { path: 'kite.rollGustGain', label: 'roll gust gain', min: 0, max: 3, step: 0.05 },
       { path: 'kite.visualScale', label: 'drawn size x', min: 1, max: 6, step: 0.1 },
+      { path: 'kite.tailLength', label: 'tail length m', min: 0, max: 15, step: 0.25 },
     ],
   },
   {
     title: 'Line',
     sliders: [
+      { path: 'line.length', label: 'length m', min: 5, max: 80, step: 0.5 },
       { path: 'line.spring', label: 'spring N/m', min: 50, max: 4000, step: 10 },
       { path: 'line.damping', label: 'damping', min: 0, max: 60, step: 0.5 },
       { path: 'line.dragPerMetre', label: 'drag per metre', min: 0, max: 0.05, step: 0.0005 },

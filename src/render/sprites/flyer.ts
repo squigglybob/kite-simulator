@@ -18,10 +18,17 @@ export interface FlyerPose {
   feetX: number
   feetY: number
   heightPx: number
+  /**
+   * Where the grip is on screen: the *projected simulated hand position*, not a pose
+   * the rig invents. The simulation already moves this point — down the body at rest,
+   * back along the line under a tug — and the string is drawn from the same point, so
+   * the two can never disagree.
+   */
+  hand: Point
   /** Screen-space direction from the hands to the kite, radians. */
   stringAngle: number
-  /** Combined hand draw, 0 to 1. Pulls the hands in toward the chest. */
-  pull: number
+  /** Line tension as a fraction of a hard brace, 0 to 1. Extends the arms. */
+  tension: number
   /** Backward body lean, radians. Driven by line tension. */
   lean: number
 }
@@ -34,8 +41,15 @@ const HEAD_RADIUS = 0.075
 const SHOULDER_HALF_WIDTH = 0.062
 const HIP_HALF_WIDTH = 0.048
 const UPPER_ARM = 0.19
-const FOREARM = 0.17
 const FOOT_SPREAD = 0.055
+
+/** Separation of the two hands either side of the grip. */
+const HAND_HALF_WIDTH = 0.095
+/** Resting elbow: hanging just below the waist, a little clear of the ribs. */
+const ELBOW_HEIGHT = 0.605
+const ELBOW_FLARE = 1.55
+/** How far a fully loaded line straightens the arms up toward it. */
+const ELBOW_RAISE = 0.55
 
 function rotateAround(point: Point, pivot: Point, angle: number): Point {
   const c = Math.cos(angle)
@@ -43,33 +57,6 @@ function rotateAround(point: Point, pivot: Point, angle: number): Point {
   const dx = point.x - pivot.x
   const dy = point.y - pivot.y
   return { x: pivot.x + dx * c - dy * s, y: pivot.y + dx * s + dy * c }
-}
-
-/**
- * Two-bone IK. Places the elbow so the arm reaches the hand, bending `side` outward.
- * Falls back to a straight arm when the target is out of reach.
- */
-function elbowFor(
-  shoulder: Point,
-  hand: Point,
-  upper: number,
-  fore: number,
-  side: number,
-): Point {
-  const dx = hand.x - shoulder.x
-  const dy = hand.y - shoulder.y
-  const distance = Math.hypot(dx, dy)
-  if (distance < 1e-4) return shoulder
-
-  const base = Math.atan2(dy, dx)
-  if (distance >= upper + fore) {
-    return { x: shoulder.x + Math.cos(base) * upper, y: shoulder.y + Math.sin(base) * upper }
-  }
-
-  const cosine = (upper * upper + distance * distance - fore * fore) / (2 * upper * distance)
-  const bend = Math.acos(Math.max(-1, Math.min(1, cosine)))
-  const angle = base + bend * side
-  return { x: shoulder.x + Math.cos(angle) * upper, y: shoulder.y + Math.sin(angle) * upper }
 }
 
 /** Draws the flyer and returns where the string should leave their hands. */
@@ -111,29 +98,53 @@ export function drawFlyer(ctx: CanvasRenderingContext2D, pose: FlyerPose): Point
   )
 
   // --- Arms -------------------------------------------------------------------
-  // Reach shortens as the hands draw back, which is what a tug looks like from behind.
+  // Posed directly rather than solved. Seen from behind, the forearms point away from
+  // the camera, so they are heavily foreshortened — the hand sits just below and inside
+  // the elbow. A two-bone IK solve in the screen plane cannot know that and throws the
+  // elbows straight out sideways instead, which reads as chicken wings.
+  //
+  // At rest the upper arms hang, elbows just below the waist. As the line loads up the
+  // arms swing toward it and straighten.
   const upper = h * UPPER_ARM
-  const fore = h * FOREARM
-  const reach = (upper + fore) * (1 - 0.38 * pose.pull)
   const aim = { x: Math.cos(pose.stringAngle), y: Math.sin(pose.stringAngle) }
+  const raise = pose.tension * ELBOW_RAISE
 
-  let handMid: Point = shoulderMid
+  const hands: Point[] = []
   for (const side of [-1, 1]) {
     const shoulder: Point = {
       x: shoulderMid.x + side * shoulderHalf,
       y: shoulderMid.y,
     }
-    const hand: Point = {
-      x: shoulder.x + aim.x * reach,
-      y: shoulder.y + aim.y * reach,
+
+    const hanging: Point = {
+      x: pose.feetX + side * shoulderHalf * ELBOW_FLARE,
+      y: pose.feetY - h * ELBOW_HEIGHT,
     }
-    const elbow = elbowFor(shoulder, hand, upper, fore, side)
+    // Loading the line lifts the arms mostly upward — the sideways component is
+    // damped, or both elbows swing out together and it reads as pointing, not bracing.
+    const reaching: Point = {
+      x: shoulder.x + aim.x * upper * 0.35,
+      y: shoulder.y + aim.y * upper,
+    }
+    const elbow: Point = {
+      x: hanging.x + (reaching.x - hanging.x) * raise,
+      y: hanging.y + (reaching.y - hanging.y) * raise,
+    }
+
+    // Both hands are on the one line, so they straddle the simulated grip.
+    const hand: Point = {
+      x: pose.hand.x + side * h * HAND_HALF_WIDTH,
+      y: pose.hand.y,
+    }
 
     pixelLine(ctx, shoulder.x, shoulder.y, elbow.x, elbow.y, C.ink, limb)
     pixelLine(ctx, elbow.x, elbow.y, hand.x, hand.y, C.ink, limb)
+    hands.push(hand)
+  }
 
-    if (side === 1) handMid = { x: (handMid.x + hand.x) / 2, y: (handMid.y + hand.y) / 2 }
-    else handMid = hand
+  const handMid: Point = {
+    x: (hands[0].x + hands[1].x) / 2,
+    y: (hands[0].y + hands[1].y) / 2,
   }
 
   // --- Head ---------------------------------------------------------------------

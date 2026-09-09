@@ -25,7 +25,7 @@ const DRIFT_FRACTION = 0.55
  * freshly rasterised sprite on almost every frame as it drifts, which allocates a
  * canvas per cloud per frame and grows the cache without bound.
  */
-const WIDTH_STEP = 8
+const WIDTH_STEP = 16
 const MAX_WIDTH = 240
 
 interface Cloud {

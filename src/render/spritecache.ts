@@ -7,6 +7,14 @@
  * the size, since a procedural sprite is *redrawn* at each size rather than scaled.
  */
 
+/**
+ * Bounded, so a sprite parameterised by a continuously varying quantity (a drifting
+ * cloud's pixel width, say) cannot grow the cache until the browser is holding hundreds
+ * of megabytes of canvases. Map preserves insertion order, so evicting the first key is
+ * a least-recently-inserted eviction.
+ */
+const MAX_ENTRIES = 400
+
 const cache = new Map<string, HTMLCanvasElement>()
 
 export function getSprite(
@@ -27,6 +35,10 @@ export function getSprite(
   ctx.imageSmoothingEnabled = false
   draw(ctx, canvas.width, canvas.height)
 
+  if (cache.size >= MAX_ENTRIES) {
+    const oldest = cache.keys().next().value
+    if (oldest !== undefined) cache.delete(oldest)
+  }
   cache.set(key, canvas)
   return canvas
 }

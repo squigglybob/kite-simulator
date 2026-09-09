@@ -48,12 +48,22 @@ const SHORE_DISTANCE = 45
 const FLYER_HEIGHT_M = 1.75
 /** Tension at which the flyer is bracing as hard as they will. */
 const BRACE_TENSION = 60
-const STRING_SEGMENTS = 14
+/**
+ * The line is sampled by projected length, not by a fixed count. At a fixed count each
+ * chord covers `lineLength / count` metres, so on an 80 m line the segment leaving the
+ * hands spanned nearly six metres and drew as a visibly rigid stick — and grew longer
+ * the more line you let out.
+ */
+const STRING_PIXELS_PER_SEGMENT = 4
+const STRING_MIN_SEGMENTS = 10
+const STRING_MAX_SEGMENTS = 72
 
 function step(dt: number): void {
   world.step(dt, input.state)
   clouds.update(dt)
-  kiteRenderer.update(world.kite, world.time)
+  kiteRenderer.update(world.kite, dt)
+  // Reeling moves config.line.length directly, so the panel needs telling.
+  if (input.state.reelIn || input.state.reelOut) panel.refresh()
 }
 
 function groundLayout(): GroundLayout {
@@ -81,9 +91,20 @@ function drawString(handScreen: Point, kiteWorld: Vec3): void {
   // Control point that puts the curve's midpoint exactly at the sagged position.
   const control = sub(scale(sagged, 2), midpoint)
 
+  const kiteScreen = camera.project(kiteWorld)
+  const screenLength = Math.hypot(
+    kiteScreen.x - handScreen.x,
+    kiteScreen.y - handScreen.y,
+  )
+  const segments = clamp(
+    Math.round(screenLength / STRING_PIXELS_PER_SEGMENT),
+    STRING_MIN_SEGMENTS,
+    STRING_MAX_SEGMENTS,
+  )
+
   const points: Point[] = []
-  for (let i = 0; i <= STRING_SEGMENTS; i++) {
-    const t = i / STRING_SEGMENTS
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments
     const u = 1 - t
     const world3 = add(
       add(scale(handWorld, u * u), scale(control, 2 * u * t)),
@@ -91,8 +112,6 @@ function drawString(handScreen: Point, kiteWorld: Vec3): void {
     )
     points.push(camera.project(world3))
   }
-  // Start from where the hands were actually drawn, not where the physics anchor is.
-  points[0] = handScreen
 
   pixelPath(ctx, points, C.ink)
 }
@@ -118,15 +137,18 @@ function render(alpha: number, frameTime: number): void {
   const heightPx = Math.max(6, FLYER_HEIGHT_M * pixelsPerMetre * (1 - 0.08 * tensionFraction))
 
   const kiteScreen = camera.project(kiteWorld)
-  const shoulderY = FEET_Y - heightPx * 0.8
-  const stringAngle = Math.atan2(kiteScreen.y - shoulderY, kiteScreen.x - BASE_W / 2)
+  // One grip, shared by the rig and the string: the projected simulated hand position.
+  // Drawing them from separate points left a kink at the hands.
+  const handScreen = camera.project(world.flyer.handPos)
+  const stringAngle = Math.atan2(kiteScreen.y - handScreen.y, kiteScreen.x - handScreen.x)
 
-  const handScreen = drawFlyer(ctx, {
+  drawFlyer(ctx, {
     feetX: BASE_W / 2,
     feetY: FEET_Y,
     heightPx,
+    hand: handScreen,
     stringAngle,
-    pull: world.flyer.pull,
+    tension: tensionFraction,
     // Tilt away from any sideways pull; a centred kite pulls straight back instead.
     lean: -Math.cos(stringAngle) * tensionFraction * 0.3,
   })

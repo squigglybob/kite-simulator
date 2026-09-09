@@ -31,8 +31,9 @@ function parseHex(hex: string): Rgb {
 
 const RAMP_RGB = SKY_RAMP.map(parseHex)
 
-let cache: HTMLCanvasElement | null = null
-let cacheKey = ''
+// Keyed rather than single-entry: the horizon moves with camera zoom, and a
+// single slot would regenerate the whole gradient on every level change.
+const cache = new Map<string, HTMLCanvasElement>()
 
 function renderGradient(width: number, horizonY: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
@@ -76,9 +77,10 @@ export function drawSky(
   horizonY: number,
 ): void {
   const key = `${width}:${horizonY}`
-  if (key !== cacheKey || !cache) {
-    cache = renderGradient(width, horizonY)
-    cacheKey = key
+  let gradient = cache.get(key)
+  if (!gradient) {
+    gradient = renderGradient(width, horizonY)
+    cache.set(key, gradient)
   }
-  ctx.drawImage(cache, 0, 0)
+  ctx.drawImage(gradient, 0, 0)
 }

@@ -54,6 +54,8 @@ export interface Config {
      *  real area. A kite 30 m away is honestly only a few pixels across, which is
      *  unreadable when it is the thing you are controlling. */
     visualScale: number
+    /** Tail length in metres, before `visualScale` is applied. */
+    tailLength: number
   }
   line: {
     length: number
@@ -76,10 +78,13 @@ export interface Config {
     drawTime: number
     /** Seconds to return to rest after release. */
     releaseTime: number
-    /** Metres the hand travels back along the line at full draw. */
+    /** Metres the hand travels back along the line at full draw. This is also what
+     *  the rig's hands visibly do, so an unrealistically deep draw looks wrong as well
+     *  as hitting the line far too hard. */
     drawDepth: number
     /** Metres of lateral hand separation at full differential. */
     lateralOffset: number
+    /** Grip height in metres. Should read as waist height on a 1.75 m figure. */
     height: number
   }
   camera: {
@@ -123,6 +128,7 @@ export const config: Config = {
     tailStrength: 2.4,
     rollGustGain: 0.5,
     visualScale: 2.2,
+    tailLength: 3.5,
   },
   line: {
     length: 30,
@@ -138,9 +144,9 @@ export const config: Config = {
   hand: {
     drawTime: 0.28,
     releaseTime: 0.4,
-    drawDepth: 1.1,
+    drawDepth: 0.55,
     lateralOffset: 0.6,
-    height: 1.4,
+    height: 1.0,
   },
   camera: {
     dist: 20,

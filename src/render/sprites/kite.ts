@@ -39,9 +39,20 @@ const MIN_FACING = 0.4
 /** How completely to billboard at the worst case. Kept under 1 so bank still reads. */
 const MAX_CORRECTION = 0.85
 
-/** Seconds between tail samples. Sets how far back in time the streamer reaches. */
-const TAIL_INTERVAL = 0.045
-const TAIL_SAMPLES = 15
+/**
+ * The tail is a short chain of points streaming downwind from the kite's tail corner.
+ *
+ * It was originally a trail of past kite positions, which looked fine while the kite
+ * was moving and collapsed to nothing when it hung still — the opposite of a real tail,
+ * which streams because of the air, not because of motion. Each link now relaxes toward
+ * the apparent wind, sagging under its own weight when the air is slow, and lags a
+ * little more the further down the tail it is, which is what gives the whip.
+ */
+const TAIL_LINKS = 12
+/** How fast a link swings toward the airflow, per second. */
+const TAIL_RESPONSE = 7
+/** Metres per second of droop in still air. */
+const TAIL_SAG = 2.4
 
 interface Frame {
   normal: Vec3
@@ -83,23 +94,51 @@ function dimensions(): { spine: number; span: number } {
 }
 
 export class KiteRenderer {
-  private trail: Vec3[] = []
-  private nextSample = 0
+  private tail: Vec3[] = []
 
-  /** Sampled on a timer so the streamer covers a fixed span of time, not of frames. */
-  update(kite: Kite, time: number): void {
-    if (time < this.nextSample) return
-    this.nextSample = time + TAIL_INTERVAL
-
+  /** Where the tail is tied on: the kite's trailing corner. */
+  private anchor(kite: Kite): Vec3 {
     const { spine } = kiteFrame(kite)
-    const size = dimensions()
-    this.trail.push(add(kite.pos, scale(spine, size.spine * 0.42)))
-    if (this.trail.length > TAIL_SAMPLES) this.trail.shift()
+    return add(kite.pos, scale(spine, dimensions().spine * 0.42))
+  }
+
+  update(kite: Kite, dt: number): void {
+    const anchor = this.anchor(kite)
+    // Scaled by visualScale alongside the kite body, so a kite drawn larger than life
+    // keeps its proportions instead of sprouting a stub.
+    const link =
+      (config.kite.tailLength * config.kite.visualScale) / (TAIL_LINKS - 1)
+
+    if (this.tail.length !== TAIL_LINKS) {
+      this.tail = Array.from({ length: TAIL_LINKS }, (_, i) =>
+        add(anchor, scale(kite.diag.windDir, link * i)),
+      )
+      return
+    }
+
+    // Slower air lets the tail hang; fast air pulls it straight out behind.
+    const sag = Math.min(TAIL_SAG / Math.max(kite.diag.airspeed, 0.5), 2)
+    let flow = add(kite.diag.windDir, v3(0, -sag, 0))
+    flow = length(flow) > 1e-4 ? normalize(flow) : v3(0, -1, 0)
+
+    this.tail[0] = anchor
+    for (let i = 1; i < TAIL_LINKS; i++) {
+      const previous = this.tail[i - 1]
+      let dir = sub(this.tail[i], previous)
+      dir = length(dir) > 1e-4 ? normalize(dir) : flow
+
+      // Links further down the tail lag more, which is what makes it crack.
+      const response = TAIL_RESPONSE * (1 - (i / TAIL_LINKS) * 0.55)
+      const blend = Math.min(response * dt, 1)
+      const eased = add(scale(dir, 1 - blend), scale(flow, blend))
+      const settled = length(eased) > 1e-4 ? normalize(eased) : flow
+
+      this.tail[i] = add(previous, scale(settled, link))
+    }
   }
 
   reset(): void {
-    this.trail = []
-    this.nextSample = 0
+    this.tail = []
   }
 
   draw(
@@ -125,8 +164,6 @@ export class KiteRenderer {
     const pLeft = camera.project(left)
     const pRight = camera.project(right)
 
-    this.drawTail(ctx, camera, pTail)
-
     // Looking at the back of the kite gives a duller, shadowed face.
     const facingAway = dot(view, kite.diag.normal) > 0
 
@@ -134,13 +171,15 @@ export class KiteRenderer {
     const body = facingAway ? C.kiteShade : C.kite
     const upper = facingAway ? C.kiteTrimShade : C.kiteTrim
 
+    const spanPx = Math.hypot(pRight.x - pLeft.x, pRight.y - pLeft.y)
+    this.drawTail(ctx, camera, pTail, spanPx)
+
     const outline: Point[] = [pNose, pLeft, pTail, pRight]
     fillPolygon(ctx, outline, body)
     fillPolygon(ctx, [pNose, pLeft, pRight], upper)
 
     // Spars, and an outline only once the kite is big enough to carry one without
     // the ink swallowing the whole shape.
-    const spanPx = Math.hypot(pRight.x - pLeft.x, pRight.y - pLeft.y)
     if (spanPx > 7) {
       pixelLine(ctx, pNose.x, pNose.y, pTail.x, pTail.y, C.ink)
       pixelLine(ctx, pLeft.x, pLeft.y, pRight.x, pRight.y, C.ink)
@@ -154,17 +193,28 @@ export class KiteRenderer {
     ctx: CanvasRenderingContext2D,
     camera: Camera,
     attach: Point,
+    spanPx: number,
   ): void {
-    if (this.trail.length < 2) return
+    if (this.tail.length < 2 || config.kite.tailLength <= 0) return
 
-    // Oldest first, so the streamer is drawn from its free end back to the kite.
-    const points: Point[] = this.trail.map((p) => camera.project(p))
-    points.push(attach)
+    const points: Point[] = this.tail.map((p) => camera.project(p))
+    points[0] = attach
+
+    // A big kite gets a ribbon thick enough to read; a distant one stays hairline.
+    const thickness = spanPx > 26 ? 2 : 1
 
     for (let i = 1; i < points.length; i++) {
       // Alternating bands, the way a real kite tail is tied from scrap ribbon.
       const color = i % 2 === 0 ? C.kiteTrim : C.kite
-      pixelLine(ctx, points[i - 1].x, points[i - 1].y, points[i].x, points[i].y, color)
+      pixelLine(
+        ctx,
+        points[i - 1].x,
+        points[i - 1].y,
+        points[i].x,
+        points[i].y,
+        color,
+        thickness,
+      )
     }
   }
 }

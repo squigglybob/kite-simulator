@@ -11,6 +11,7 @@
     "sanity": "esbuild scripts/sanity.ts --bundle --platform=node --format=esm --log-level=warning --outfile=node_modules/.cache/sanity.mjs && node node_modules/.cache/sanity.mjs"
   },
   "devDependencies": {
+    "esbuild": "^0.21.5",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   },

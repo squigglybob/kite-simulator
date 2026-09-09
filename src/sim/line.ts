@@ -33,6 +33,9 @@ export function solveLine(kitePos: Vec3, handPos: Vec3, kiteVel: Vec3): LineStat
       0,
       config.line.spring * extension + config.line.damping * radialSpeed,
     )
+    // Capped, because line length can change instantaneously — a slider drag, or a
+    // future scripted event — and an unbounded spring force integrates to infinity.
+    tension = Math.min(tension, config.line.maxTension)
   }
 
   return { dir, distance, extension, tension }

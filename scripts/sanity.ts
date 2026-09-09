@@ -146,6 +146,68 @@ scenario('losing the wind drops the kite, and it recovers', () => {
   console.log(`  roll wander ${rollWander.toFixed(1)} deg`)
 })
 
+scenario('a violent line length change does not blow up', () => {
+  // Reeling is rate-limited, but the tuning panel can set line length instantly, and a
+  // large jump puts a huge extension on the spring. Unclamped, that integrated to
+  // infinity in a single step and left the whole simulation stuck at NaN.
+  config.line.length = 80
+  const world = new World()
+  run(world, 40)
+
+  config.line.length = 10
+  const shock = run(world, 25)
+
+  const bad = shock.findIndex((s) => !finite(s))
+  check('finiteness', bad < 0, `state went non-finite at t=${(bad * DT).toFixed(2)}s`)
+
+  const peak = Math.max(...shock.map((s) => s.speed))
+  const settled = mean(last(shock, 5).map((s) => s.altitude))
+
+  check('bounded', peak < 95, `peak speed ${peak.toFixed(1)} m/s`)
+  check('recovers', settled > 1, `settled at ${settled.toFixed(1)} m, still on the sand`)
+
+  console.log(`  peak speed  ${peak.toFixed(1)} m/s`)
+  console.log(`  altitude    ${settled.toFixed(1)} m on a 10 m line`)
+})
+
+scenario('pitch does not flip-flop', () => {
+  // The pitch spring's stiffness scales with dynamic pressure, so a fixed damping
+  // coefficient is only right at one wind speed. The original 0.9 worked out to a
+  // damping ratio of about 0.24, and at 10 m/s that rang at roughly 12 Hz *with no
+  // disturbance at all* — 36 direction changes a second, over a 22 degree swing.
+  // Expressing damping as a fraction of critical instead holds it steady at any wind.
+  config.wind.base = 10
+  const world = new World()
+  run(world, 45)
+
+  const reversalsPerSecond = (samples: Sample[], pick: (s: Sample) => number) => {
+    let n = 0
+    for (let i = 2; i < samples.length; i++) {
+      const before = pick(samples[i - 1]) - pick(samples[i - 2])
+      const after = pick(samples[i]) - pick(samples[i - 1])
+      if (before !== 0 && after !== 0 && Math.sign(before) !== Math.sign(after)) n++
+    }
+    return n / (samples.length / HZ)
+  }
+
+  const steady = run(world, 3)
+  const steadyPitch = reversalsPerSecond(steady, (s) => s.alpha)
+  check('steady pitch', steadyPitch < 5, `${steadyPitch.toFixed(1)} reversals/s in steady flight`)
+
+  // Adjusting the bridle in flight is the sharpest disturbance available: it moves the
+  // trim target instantly.
+  config.kite.bridleLower = 0.45
+  const settling = run(world, 3)
+  const jumpPitch = reversalsPerSecond(settling, (s) => s.alpha)
+  const jumpRoll = reversalsPerSecond(settling, (s) => s.roll)
+
+  check('pitch settles', jumpPitch < 5, `${jumpPitch.toFixed(1)} reversals/s after a bridle change`)
+  check('roll settles', jumpRoll < 5, `${jumpRoll.toFixed(1)} reversals/s after a bridle change`)
+
+  console.log(`  steady      ${steadyPitch.toFixed(1)} pitch reversals/s`)
+  console.log(`  after jump  ${jumpPitch.toFixed(1)} pitch, ${jumpRoll.toFixed(1)} roll reversals/s`)
+})
+
 // ---------------------------------------------------------------------------
 
 if (failures.length) {

@@ -1,4 +1,6 @@
 import { config } from '../../sim/config'
+import { bridleGeometry } from '../../sim/bridle'
+import { LOWER_BRIDLE, NOSE, SPAR, TAIL } from '../../sim/shape'
 import type { Kite } from '../../sim/kite'
 import {
   add,
@@ -6,6 +8,7 @@ import {
   dot,
   length,
   normalize,
+  rotateAbout,
   scale,
   sub,
   v3,
@@ -32,12 +35,38 @@ import type { Camera } from '../camera'
  * from the viewer, the normal is eased toward the camera until the kite reads again.
  * The orientation, spin and bank all stay continuous; only the foreshortening is
  * flattered.
+ *
+ * The bridle is drawn but not simulated. Three legs run from the spar holes and the
+ * foot of the spine to a tow point standing off the front of the kite, and the flying
+ * line ends there rather than at the kite's centre. Simulating the legs as constraints
+ * would buy nothing the physics does not already have: what a bridle *does* is set the
+ * angle the kite presents to the wind, and that is exactly `kite.trimDeg`.
  */
+
+const DEG = Math.PI / 180
+
+/**
+ * How clearly the nose must read as being above the tail on screen.
+ *
+ * The kite's spine points mostly *away* from this camera, so under perspective the nose
+ * — being further off — is dragged toward the horizon faster than its slight rise lifts
+ * it. Below roughly 55 degrees of elevation that wins outright and the kite projects
+ * upside down. Standing the kite up further fixes it, so the pitch floor is raised until
+ * this is satisfied.
+ */
+const MIN_UPNESS = 0.35
+/** Ceiling on that search: past here the kite is edge-on to the wind and reads oddly. */
+const MAX_PITCH = (85 * Math.PI) / 180
 
 /** Below this much face-on-ness, open the kite up toward the camera. */
 const MIN_FACING = 0.4
 /** How completely to billboard at the worst case. Kept under 1 so bank still reads. */
 const MAX_CORRECTION = 0.85
+
+/** Upper legs attach half way out along each spar, not at the tips. */
+const BRIDLE_SPAN_FRACTION = 0.25
+
+const WORLD_UP: Vec3 = { x: 0, y: 1, z: 0 }
 
 /**
  * The tail is a short chain of points streaming downwind from the kite's tail corner.
@@ -56,14 +85,23 @@ const TAIL_SAG = 2.4
 
 interface Frame {
   normal: Vec3
-  /** Nose-to-tail, along the airflow. */
-  spine: Vec3
+  /** Attitude before the edge-on readability correction, for shading. */
+  lit: Vec3
+  /** Centre toward the nose: up the line, away from the flyer. */
+  nose: Vec3
   /** Wingtip to wingtip. */
   span: Vec3
 }
 
-function kiteFrame(kite: Kite, view?: Vec3): Frame {
+function frameAtPitch(kite: Kite, pitch: number, view?: Vec3): Frame {
   let normal = kite.diag.normal
+
+  if (pitch > 1e-3) {
+    let lateral = cross(WORLD_UP, kite.diag.windDir)
+    lateral = length(lateral) > 1e-4 ? normalize(lateral) : v3(1, 0, 0)
+    normal = rotateAbout(normal, lateral, -pitch)
+  }
+  const litNormal = normal
 
   if (view) {
     // `-view` is the direction that would face the kite straight at the camera.
@@ -77,29 +115,108 @@ function kiteFrame(kite: Kite, view?: Vec3): Frame {
     }
   }
 
-  const windDir = kite.diag.windDir
+  // The nose points up the line, away from the flyer. Deriving it from the airflow
+  // instead — which is what this did first — puts the nose on the upwind side, and a
+  // kite at any decent elevation then renders hanging upside down. A single-line kite
+  // cannot fly inverted: its bridle holds the nose up the line, and the tail hangs back
+  // toward the flyer.
+  const lineDir = kite.diag.line.dir
+  let nose = sub(lineDir, scale(normal, dot(lineDir, normal)))
 
-  // The spine lies in the kite's plane, aligned with the flow across it.
-  let spine = sub(windDir, scale(normal, dot(windDir, normal)))
-  spine = length(spine) > 1e-4 ? normalize(spine) : v3(0, 1, 0)
+  if (length(nose) <= 1e-4) {
+    // Line square to the face. Fall back to the airflow for a stable axis.
+    const windDir = kite.diag.windDir
+    nose = sub(windDir, scale(normal, dot(windDir, normal)))
+  }
+  nose = length(nose) > 1e-4 ? normalize(nose) : v3(0, 1, 0)
 
-  return { normal, spine, span: cross(normal, spine) }
+  return { normal, lit: litNormal, nose, span: cross(normal, nose) }
+}
+
+/**
+ * How far the nose rises on screen per unit travelled along the spine. Negative means
+ * the nose projects *below* the tail — the kite renders inverted.
+ *
+ * Moving along the spine changes both height and depth, and depth pulls a point above
+ * the horizon back down toward it. This is the derivative of the projected height, so
+ * it captures both effects at once.
+ */
+function noseUpness(nose: Vec3, centre: Vec3): number {
+  const depth = Math.max(centre.z + config.camera.dist, 0.5)
+  return nose.y - ((centre.y - config.camera.eyeHeight) * nose.z) / depth
+}
+
+export function kiteFrame(kite: Kite, centre: Vec3, view?: Vec3): Frame {
+  // Pitch the drawn kite back, but only by the shortfall. The simulated attitude is
+  // honest — the bridle geometry already stands the kite up when it is low in the
+  // window and lays it flat near the zenith — but this camera looks along the wind
+  // rather than up at the kite, and a flat kite seen from there is edge-on. A viewer
+  // would tilt their head; the camera cannot, so the kite is tipped toward it instead.
+  const floor = Math.max(
+    0,
+    config.kite.drawPitchFloorDeg * DEG - Math.abs(kite.diag.alpha),
+  )
+
+  const base = frameAtPitch(kite, floor, view)
+  if (noseUpness(base.nose, centre) >= MIN_UPNESS) return base
+
+  // Perspective is winning. Stand the kite up further until the nose reads above the
+  // tail. Bisection rather than a flip, so the correction changes smoothly as the kite
+  // moves instead of popping over at the crossover.
+  let low = floor
+  let high = MAX_PITCH
+  for (let i = 0; i < 10; i++) {
+    const mid = (low + high) / 2
+    if (noseUpness(frameAtPitch(kite, mid, view).nose, centre) >= MIN_UPNESS) high = mid
+    else low = mid
+  }
+  return frameAtPitch(kite, high, view)
+}
+
+/** Direction from the camera to a world point. */
+function viewTo(target: Vec3): Vec3 {
+  const cameraPos = v3(0, config.camera.eyeHeight, -config.camera.dist)
+  return normalize(sub(target, cameraPos))
 }
 
 function dimensions(): { spine: number; span: number } {
-  // A rhombus of diagonals d1 and d2 has area d1*d2/2, so this tracks the area the
-  // physics is using however the player tunes it, then scales up for readability.
-  const diagonal = Math.sqrt(2 * config.kite.area) * config.kite.visualScale
-  return { spine: diagonal * 1.08, span: diagonal * 0.92 }
+  // A kite quadrilateral of diagonals d1 and d2 has area d1*d2/2. Splitting that by the
+  // aspect ratio keeps the area exactly what the physics is using at any proportion,
+  // then scales the whole thing up for readability.
+  const area = 2 * config.kite.area
+  const aspect = Math.max(config.kite.aspect, 0.2)
+  const scaleUp = config.kite.visualScale
+  return {
+    spine: Math.sqrt(area * aspect) * scaleUp,
+    span: Math.sqrt(area / aspect) * scaleUp,
+  }
 }
 
 export class KiteRenderer {
   private tail: Vec3[] = []
 
-  /** Where the tail is tied on: the kite's trailing corner. */
+  /** Where the tail is tied on: the foot of the spine, nearest the flyer. */
   private anchor(kite: Kite): Vec3 {
-    const { spine } = kiteFrame(kite)
-    return add(kite.pos, scale(spine, dimensions().spine * 0.42))
+    const { nose } = kiteFrame(kite, kite.pos, viewTo(kite.pos))
+    return add(kite.pos, scale(nose, dimensions().spine * TAIL))
+  }
+
+  /**
+   * The tow point, where the three bridle legs meet and the flying line begins. Its
+   * position comes from the same leg-length solve the physics uses, so the drawn bridle
+   * and the simulated one cannot drift apart. It stands off the windward face, which is
+   * why the line reads as attaching to the near side of the kite rather than
+   * disappearing behind it.
+   */
+  bridlePoint(kite: Kite, centre: Vec3): Vec3 {
+    const size = dimensions()
+    const { nose, normal } = kiteFrame(kite, centre, viewTo(centre))
+    const bridle = bridleGeometry()
+    return add(
+      add(centre, scale(nose, size.spine * bridle.along)),
+      // `normal` is the leeward side, so the bridle hangs off its opposite.
+      scale(normal, -size.spine * bridle.standoff),
+    )
   }
 
   update(kite: Kite, dt: number): void {
@@ -147,25 +264,24 @@ export class KiteRenderer {
     kite: Kite,
     centre: Vec3,
   ): void {
-    const cameraPos = v3(0, config.camera.eyeHeight, -config.camera.dist)
-    const view = normalize(sub(centre, cameraPos))
-
-    const { spine, span } = kiteFrame(kite, view)
+    const view = viewTo(centre)
+    const { nose: noseDir, span, lit } = kiteFrame(kite, centre, view)
     const size = dimensions()
 
-    const nose = add(centre, scale(spine, -size.spine * 0.58))
-    const tail = add(centre, scale(spine, size.spine * 0.42))
-    const sparOffset = scale(spine, -size.spine * 0.08)
+    const nose = add(centre, scale(noseDir, size.spine * NOSE))
+    const tail = add(centre, scale(noseDir, size.spine * TAIL))
+    // The cross spar sits a quarter of the way down from the nose, which is what makes
+    // the outline a kite rather than a rhombus.
+    const sparOffset = scale(noseDir, size.spine * SPAR)
     const left = add(add(centre, scale(span, -size.span * 0.5)), sparOffset)
     const right = add(add(centre, scale(span, size.span * 0.5)), sparOffset)
-
     const pNose = camera.project(nose)
     const pTail = camera.project(tail)
     const pLeft = camera.project(left)
     const pRight = camera.project(right)
 
     // Looking at the back of the kite gives a duller, shadowed face.
-    const facingAway = dot(view, kite.diag.normal) > 0
+    const facingAway = dot(view, lit) > 0
 
     // The back of the kite is the unlit side, not a different fabric.
     const body = facingAway ? C.kiteShade : C.kite
@@ -186,6 +302,46 @@ export class KiteRenderer {
     }
     if (spanPx > 12) {
       pixelPath(ctx, [...outline, pNose], C.ink)
+    }
+  }
+
+  /**
+   * The three bridle legs, drawn last so they sit over both the kite face and the
+   * flying line — they genuinely stand in front of both.
+   *
+   * Seen from behind the flyer, the tow point stands off almost straight along the view
+   * axis, so the legs foreshorten to a small fan across the face rather than a visible
+   * triangle. That is honest to the viewpoint; the payoff is that the line now clearly
+   * ends *on* the kite instead of vanishing behind it.
+   */
+  drawBridle(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    kite: Kite,
+    centre: Vec3,
+  ): void {
+    const view = viewTo(centre)
+    const { nose: noseDir, span } = kiteFrame(kite, centre, view)
+    const size = dimensions()
+
+    const sparOffset = scale(noseDir, size.spine * SPAR)
+    const inboard = size.span * BRIDLE_SPAN_FRACTION
+    const pLeft = camera.project(add(add(centre, scale(span, -inboard)), sparOffset))
+    const pRight = camera.project(add(add(centre, scale(span, inboard)), sparOffset))
+    const pFoot = camera.project(
+      add(centre, scale(noseDir, size.spine * LOWER_BRIDLE)),
+    )
+    const pTow = camera.project(this.bridlePoint(kite, centre))
+
+    const tipSpanPx = Math.hypot(
+      camera.project(add(centre, scale(span, size.span * 0.5))).x -
+        camera.project(add(centre, scale(span, -size.span * 0.5))).x,
+      0,
+    )
+    if (tipSpanPx < 9) return
+
+    for (const anchor of [pLeft, pRight, pFoot]) {
+      pixelLine(ctx, pTow.x, pTow.y, anchor.x, anchor.y, C.ink)
     }
   }
 

@@ -47,7 +47,7 @@ input.onPress('KeyT', () => panel.toggle())
 const SHORE_DISTANCE = 45
 const FLYER_HEIGHT_M = 1.75
 /** Tension at which the flyer is bracing as hard as they will. */
-const BRACE_TENSION = 60
+const BRACE_TENSION = 35
 /**
  * The line is sampled by projected length, not by a fixed count. At a fixed count each
  * chord covers `lineLength / count` metres, so on an 80 m line the segment leaving the
@@ -82,19 +82,20 @@ function groundLayout(): GroundLayout {
  * The line, sampled as a curve in world space and then projected, so perspective
  * applies along its length rather than to a flat approximation of it.
  */
-function drawString(handScreen: Point, kiteWorld: Vec3): void {
+/** `tow` is the bridle's tow point, not the kite's centre — that is where a line ends. */
+function drawString(handScreen: Point, tow: Vec3): void {
   const handWorld = world.flyer.handPos
   const sag = sagDepth(world.kite.diag.line)
 
-  const midpoint = scale(add(handWorld, kiteWorld), 0.5)
+  const midpoint = scale(add(handWorld, tow), 0.5)
   const sagged = sub(midpoint, v3(0, sag, 0))
   // Control point that puts the curve's midpoint exactly at the sagged position.
   const control = sub(scale(sagged, 2), midpoint)
 
-  const kiteScreen = camera.project(kiteWorld)
+  const towScreen = camera.project(tow)
   const screenLength = Math.hypot(
-    kiteScreen.x - handScreen.x,
-    kiteScreen.y - handScreen.y,
+    towScreen.x - handScreen.x,
+    towScreen.y - handScreen.y,
   )
   const segments = clamp(
     Math.round(screenLength / STRING_PIXELS_PER_SEGMENT),
@@ -108,7 +109,7 @@ function drawString(handScreen: Point, kiteWorld: Vec3): void {
     const u = 1 - t
     const world3 = add(
       add(scale(handWorld, u * u), scale(control, 2 * u * t)),
-      scale(kiteWorld, t * t),
+      scale(tow, t * t),
     )
     points.push(camera.project(world3))
   }
@@ -136,11 +137,13 @@ function render(alpha: number, frameTime: number): void {
   // Leaning back against the pull foreshortens the figure slightly.
   const heightPx = Math.max(6, FLYER_HEIGHT_M * pixelsPerMetre * (1 - 0.08 * tensionFraction))
 
-  const kiteScreen = camera.project(kiteWorld)
+  // The line ends at the bridle's tow point, which stands off the front of the kite.
+  const towWorld = kiteRenderer.bridlePoint(kite, kiteWorld)
+  const towScreen = camera.project(towWorld)
   // One grip, shared by the rig and the string: the projected simulated hand position.
   // Drawing them from separate points left a kink at the hands.
   const handScreen = camera.project(world.flyer.handPos)
-  const stringAngle = Math.atan2(kiteScreen.y - handScreen.y, kiteScreen.x - handScreen.x)
+  const stringAngle = Math.atan2(towScreen.y - handScreen.y, towScreen.x - handScreen.x)
 
   drawFlyer(ctx, {
     feetX: BASE_W / 2,
@@ -153,8 +156,12 @@ function render(alpha: number, frameTime: number): void {
     lean: -Math.cos(stringAngle) * tensionFraction * 0.3,
   })
 
-  drawString(handScreen, kiteWorld)
+  // Body first, then the line over it, then the bridle over both. The tow point is
+  // nearer the camera than the kite is, so a line drawn underneath the body looked as
+  // though it passed behind the kite.
   kiteRenderer.draw(ctx, camera, kite, kiteWorld)
+  drawString(handScreen, towWorld)
+  kiteRenderer.drawBridle(ctx, camera, kite, kiteWorld)
 
   if (showVectors) drawForceVectors(ctx, kite, camera)
   drawHud(ctx, world, Math.round(1 / smoothedFrameTime), camera.zoom)

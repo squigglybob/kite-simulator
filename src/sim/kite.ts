@@ -1,4 +1,5 @@
 import { config } from './config'
+import { bridleGeometry } from './bridle'
 import { dragCoefficient, dynamicPressure, liftCoefficient } from './aero'
 import { solveLine, type LineState } from './line'
 import { lateralGustGradient, windAt } from './wind'
@@ -36,6 +37,8 @@ const DEG = Math.PI / 180
 const HALF_PI = Math.PI / 2
 const WORLD_UP: Vec3 = { x: 0, y: 1, z: 0 }
 const GROUND_Y = 0.15
+/** Backstop on kite speed. Nothing physical should approach this. */
+const MAX_SPEED = 90
 
 export interface KiteDiagnostics {
   apparent: Vec3
@@ -87,7 +90,7 @@ export class Kite {
     this.pos = add(handPos, v3(0, Math.sin(e) * r, Math.cos(e) * r))
     this.prevPos = copy(this.pos)
     this.vel = v3()
-    this.alpha = config.kite.trimDeg * DEG
+    this.alpha = bridleGeometry().angle * 0.4
     this.alphaRate = 0
     this.roll = 0
     this.rollRate = 0
@@ -104,14 +107,37 @@ export class Kite {
     const line = solveLine(this.pos, handPos, this.vel)
 
     // --- Pitch ----------------------------------------------------------------
-    // Angle of attack is a state, pitching on a damped spring toward the bridle's trim
-    // setting. Modelling it this way rather than deriving it from the line direction is
-    // what keeps the kite stable: a lagging alpha lets gusts and manoeuvres push it past
-    // the stall transiently, without the runaway that a geometric coupling produces.
+    // The bridle holds a fixed angle between the line and the kite's chord, so the
+    // incidence the kite presents is *geometric*: it is that bridle angle less the
+    // angle between the line and the airflow. A kite low in the window therefore runs
+    // at a high angle of attack — near stall, poor lift, high drag — and one near the
+    // zenith runs nearly flat. That is what a real kite does, and it is what makes the
+    // elevation self-correcting: climbing reduces incidence, which reduces lift.
+    //
+    // Angle of attack stays a state on a damped spring toward that geometric target
+    // rather than snapping to it, which preserves the lag that lets a gust push the
+    // kite transiently past the stall.
     const q = dynamicPressure(airspeed)
-    const trim = k.trimDeg * DEG
+
+    let target = bridleGeometry().angle
+    if (airspeed > 0.05) {
+      const toWind = Math.acos(
+        Math.max(-1, Math.min(1, dot(line.dir, scale(apparent, 1 / airspeed)))),
+      )
+      target -= toWind
+    }
+    // Kept off the extremes: a negative target flies the kite inverted into the ground,
+    // and beyond edge-on the flat-plate curves stop meaning anything.
+    target = Math.max(-2 * DEG, Math.min(target, 70 * DEG))
+
+    // Damping is expressed as a fraction of critical rather than an absolute
+    // coefficient, because critical damping scales with dynamic pressure: a fixed
+    // coefficient that feels right in a stiff breeze is badly underdamped elsewhere,
+    // and the kite oscillates in pitch at several hertz.
+    const pitchRate = k.pitchStiffness * q
+    const pitchCritical = 2 * Math.sqrt(Math.max(pitchRate * k.pitchInertia, 1e-9))
     const pitchMoment =
-      k.pitchStiffness * q * (trim - this.alpha) - k.pitchDamp * this.alphaRate
+      pitchRate * (target - this.alpha) - k.pitchDampRatio * pitchCritical * this.alphaRate
     this.alphaRate += (pitchMoment / k.pitchInertia) * dt
     this.alpha += this.alphaRate * dt
     this.alpha = Math.max(-HALF_PI, Math.min(HALF_PI, this.alpha))
@@ -156,6 +182,10 @@ export class Kite {
 
     const invMass = 1 / k.mass
     addScaledInPlace(this.vel, force, dt * invMass)
+
+    const speed = length(this.vel)
+    if (speed > MAX_SPEED) this.vel = scale(this.vel, MAX_SPEED / speed)
+
     addScaledInPlace(this.pos, this.vel, dt)
 
     if (this.pos.y < GROUND_Y) {
@@ -171,13 +201,22 @@ export class Kite {
     // --- Integrate roll -------------------------------------------------------
     // Every term scales with dynamic pressure, because a tail in dead air does
     // nothing. That is deliberate: it is what turns a stall into a dive.
-    const restoring = -k.tailStrength * q * Math.sin(this.roll)
+    const rollRateConstant = k.tailStrength * q
+    const rollCritical = 2 * Math.sqrt(Math.max(rollRateConstant * k.rollInertia, 1e-9))
+    const restoring = -rollRateConstant * Math.sin(this.roll)
     const disturbance =
       lateralGustGradient(this.pos, time, 0.8) * k.rollGustGain * q
-    const damping = -k.rollDamp * this.rollRate
+    const damping = -k.rollDampRatio * rollCritical * this.rollRate
     this.rollRate += ((restoring + disturbance + damping) / k.rollInertia) * dt
     this.roll += this.rollRate * dt
     this.roll = Math.max(-Math.PI, Math.min(Math.PI, this.roll))
+
+    // A NaN anywhere in the state is permanent — it propagates through every later
+    // step and the game never recovers. Relaunch instead of wedging.
+    if (!Number.isFinite(this.pos.x + this.pos.y + this.pos.z + this.roll)) {
+      this.reset(handPos)
+      return
+    }
 
     // --- Diagnostics ----------------------------------------------------------
     const rel = sub(this.pos, handPos)

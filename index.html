@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kite Flyer</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #0d0f14;
+        overflow: hidden;
+      }
+      /* Flex row so the tuning panel reserves its own width rather than covering
+         the game. The stage then centres whatever space is left over. */
+      body {
+        display: flex;
+        align-items: stretch;
+      }
+      #stage {
+        flex: 1;
+        min-width: 0;
+        display: grid;
+        place-items: center;
+      }
+      canvas {
+        display: block;
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage"><canvas id="screen"></canvas></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

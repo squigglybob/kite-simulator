@@ -1,0 +1,20 @@
+{
+  "name": "kite-flyer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "sanity": "esbuild scripts/sanity.ts --bundle --platform=node --format=esm --log-level=warning --outfile=node_modules/.cache/sanity.mjs && node node_modules/.cache/sanity.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  },
+  "dependencies": {
+    "simplex-noise": "^4.0.3"
+  }
+}

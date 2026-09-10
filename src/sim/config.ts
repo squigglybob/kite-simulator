@@ -111,7 +111,8 @@ export interface Config {
     /** Ceiling on line tension. A real line would part; here it stops a large, sudden
      *  length change from launching the kite to infinity in a single step. */
     maxTension: number
-    /** Sag depth as a fraction of line length when fully slack. */
+    /** Multiplier on the physically derived sag. One is the honest catenary; less
+     *  understates the droop, more exaggerates it. */
     sagFactor: number
     /** The same, for the bridle legs, as a fraction of the spine. They are line and
      *  not wire, so they go soft when the kite is unloaded. */
@@ -211,7 +212,7 @@ export const config: Config = {
     reelRate: 6,
     tautTension: 14,
     maxTension: 1200,
-    sagFactor: 0.16,
+    sagFactor: 1,
     bridleSag: 0.13,
   },
   hand: {

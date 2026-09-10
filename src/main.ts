@@ -80,6 +80,8 @@ input.onPress('KeyW', () => (showWindow = !showWindow))
 /** World-space distance to the waterline. Fixes where sea meets sand on screen. */
 const SHORE_DISTANCE = 45
 const FLYER_HEIGHT_M = 1.75
+/** The line lies on the sand rather than sinking through it. */
+const GROUND_CLEARANCE = 0.1
 /** Tension at which the flyer is bracing as hard as they will. */
 const BRACE_TENSION = 35
 /**
@@ -114,17 +116,39 @@ function groundLayout(): GroundLayout {
 
 /**
  * The line, sampled as a curve in world space and then projected, so perspective
- * applies along its length rather than to a flat approximation of it.
+ * applies along its length rather than to a flat approximation of it. `tow` is the
+ * bridle's tow point, not the kite's centre — that is where a line ends.
+ *
+ * A cubic rather than a quadratic, and both control points hang the same distance
+ * *below the chord* rather than at the same absolute height. That distinction is the
+ * whole thing: pinning them to one height makes the droop negligible at the low end
+ * and enormous at the high end, so a line at any angle between vertical and flat comes
+ * out as an S. Measuring the droop from the chord keeps the bow symmetric, which is
+ * what a hanging line does, while the extra control point still lets a really slack
+ * line drop away from the hand, run along the beach and rise again at the far end —
+ * something a quadratic, bowing toward a single point, cannot draw.
+ *
+ * Points are clamped to ground level as they are sampled, rather than the sag being
+ * capped beforehand. Capping first meant a kite already lying on the sand had no room
+ * left to droop into, so the line snapped straight exactly when it should have looked
+ * its slackest.
  */
-/** `tow` is the bridle's tow point, not the kite's centre — that is where a line ends. */
 function drawString(handScreen: Point, tow: Vec3): void {
   const handWorld = world.flyer.handPos
   const sag = sagDepth(world.kite.diag.line)
 
-  const midpoint = scale(add(handWorld, tow), 0.5)
-  const sagged = sub(midpoint, v3(0, sag, 0))
-  // Control point that puts the curve's midpoint exactly at the sagged position.
-  const control = sub(scale(sagged, 2), midpoint)
+  // Both controls hang this far under the chord. A cubic whose controls are dropped by
+  // `d` sits 0.75 * d below the chord at its midpoint, so this lands the curve on
+  // exactly the sag the line physics asked for.
+  const droop = sag / 0.75
+  const chordAt = (t: number): Vec3 =>
+    v3(
+      handWorld.x + (tow.x - handWorld.x) * t,
+      handWorld.y + (tow.y - handWorld.y) * t - droop,
+      handWorld.z + (tow.z - handWorld.z) * t,
+    )
+  const first = chordAt(0.25)
+  const second = chordAt(0.75)
 
   const towScreen = camera.project(tow)
   const screenLength = Math.hypot(
@@ -142,12 +166,15 @@ function drawString(handScreen: Point, tow: Vec3): void {
     const t = i / segments
     const u = 1 - t
     const world3 = add(
-      add(scale(handWorld, u * u), scale(control, 2 * u * t)),
-      scale(tow, t * t),
+      add(scale(handWorld, u * u * u), scale(first, 3 * u * u * t)),
+      add(scale(second, 3 * u * t * t), scale(tow, t * t * t)),
     )
+    // The beach stops it, wherever along its length that happens.
+    if (world3.y < GROUND_CLEARANCE) world3.y = GROUND_CLEARANCE
     points.push(camera.project(world3))
   }
 
+  points[0] = handScreen
   pixelPath(ctx, points, C.ink)
 }
 

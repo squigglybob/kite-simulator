@@ -76,7 +76,7 @@ const SECTIONS: Section[] = [
       { path: 'line.reelRate', label: 'reel rate m/s', min: 0.5, max: 20, step: 0.5 },
       { path: 'line.tautTension', label: 'taut tension N', min: 1, max: 100, step: 1 },
       { path: 'line.maxTension', label: 'max tension N', min: 100, max: 5000, step: 50 },
-      { path: 'line.sagFactor', label: 'sag factor', min: 0, max: 0.5, step: 0.005 },
+      { path: 'line.sagFactor', label: 'line sag x', min: 0, max: 2.5, step: 0.05 },
       { path: 'line.bridleSag', label: 'bridle sag', min: 0, max: 0.5, step: 0.005 },
     ],
   },

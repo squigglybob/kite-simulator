@@ -42,10 +42,23 @@ export function solveLine(kitePos: Vec3, handPos: Vec3, kiteVel: Vec3): LineStat
 }
 
 /**
- * Sag depth in metres for rendering. Purely visual, but it is the clearest readout of
- * tension the player has: a slack line bellies, a taut one snaps straight.
+ * Sag depth in metres for rendering.
+ *
+ * Driven by how much *spare line* there is, not by how much tension there is. Those
+ * sound equivalent and are not: tension is zero the instant the line stops being taut,
+ * so a tension-based sag looks the same whether you have a centimetre of slack or
+ * twenty metres of it — and it snaps straight the moment any load appears. What you
+ * would actually see is a great loop of line on the ground that has to be reeled in
+ * before pulling on it does anything at all.
+ *
+ * A cable of length L spanning a distance d hangs with sag s, and for a shallow
+ * parabolic curve the extra length it needs is 8s²/3d. Turned round, that gives the
+ * sag from the excess — which is exactly what the simulation already knows.
  */
 export function sagDepth(line: LineState): number {
-  const slackness = 1 - Math.min(line.tension / config.line.tautTension, 1)
-  return slackness * slackness * line.distance * config.line.sagFactor
+  // `extension` is how far the line is stretched past its length, so its negative is
+  // how much line is spare.
+  const spare = -line.extension
+  if (spare <= 0) return 0
+  return Math.sqrt((3 * line.distance * spare) / 8) * config.line.sagFactor
 }

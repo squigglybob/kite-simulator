@@ -127,6 +127,12 @@ export interface Config {
     /** Grip height in metres. Should read as waist height on a 1.75 m figure. */
     height: number
   }
+  audio: {
+    /** Ambient bed level, 0 to 1. */
+    volume: number
+    /** Seconds of overlap where each pass of the loop crossfades into the next. */
+    crossfadeSeconds: number
+  }
   camera: {
     /** Distance the camera sits behind the flyer. Also what keeps a kite at 90 degrees
      *  of azimuth on screen, since it never reaches zero depth in camera space. */
@@ -191,6 +197,10 @@ export const config: Config = {
     drawDepth: 0.55,
     lateralOffset: 0.6,
     height: 1.0,
+  },
+  audio: {
+    volume: 0.55,
+    crossfadeSeconds: 4,
   },
   camera: {
     dist: 20,

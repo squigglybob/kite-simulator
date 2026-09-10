@@ -1,3 +1,4 @@
+import { Ambience } from './audio/ambience'
 import { startLoop } from './core/loop'
 import { add, scale, sub, v3, type Vec3 } from './core/vec3'
 import { createInput } from './input/keys'
@@ -5,6 +6,7 @@ import { Camera, FEET_Y } from './render/camera'
 import { C } from './render/palette'
 import { pixelPath, type Point } from './render/raster'
 import { BASE_H, BASE_W, Screen } from './render/screen'
+import { loadScenery } from './render/assets'
 import { CloudField } from './render/sprites/cloud'
 import { drawFlyer } from './render/sprites/flyer'
 import { drawGround, type GroundLayout } from './render/sprites/ground'
@@ -28,12 +30,27 @@ const camera = new Camera()
 const world = new World()
 const input = createInput()
 const clouds = new CloudField()
+
+// The game runs immediately on the procedural coastline; the generated beach swaps in
+// whenever it finishes loading.
+void loadScenery()
+
+// Downloaded and decoded straight away, but silent until the first key or click — no
+// browser will start audio before the page has been interacted with.
+const ambience = new Ambience()
+void ambience.load()
+ambience.unlockOn()
 const kiteRenderer = new KiteRenderer()
 
-const panel = createTuningPanel(() => {
-  world.reset()
-  kiteRenderer.reset()
-})
+const panel = createTuningPanel(
+  () => {
+    world.reset()
+    kiteRenderer.reset()
+  },
+  (path) => {
+    if (path.startsWith('audio.')) ambience.refreshVolume()
+  },
+)
 let showVectors = false
 
 input.onPress('KeyR', () => {
@@ -42,6 +59,7 @@ input.onPress('KeyR', () => {
 })
 input.onPress('KeyV', () => (showVectors = !showVectors))
 input.onPress('KeyT', () => panel.toggle())
+input.onPress('KeyM', () => ambience.toggleMute())
 
 /** World-space distance to the waterline. Fixes where sea meets sand on screen. */
 const SHORE_DISTANCE = 45

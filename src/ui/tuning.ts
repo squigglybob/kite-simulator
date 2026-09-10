@@ -88,6 +88,13 @@ const SECTIONS: Section[] = [
     ],
   },
   {
+    title: 'Ambience',
+    sliders: [
+      { path: 'audio.volume', label: 'sea volume', min: 0, max: 1, step: 0.02 },
+      { path: 'audio.crossfadeSeconds', label: 'loop crossfade s', min: 0.5, max: 15, step: 0.5 },
+    ],
+  },
+  {
     title: 'Camera',
     sliders: [
       { path: 'camera.dist', label: 'camera setback m', min: 3, max: 60, step: 0.5 },
@@ -144,7 +151,10 @@ export interface TuningPanel {
   refresh(): void
 }
 
-export function createTuningPanel(onReset: () => void): TuningPanel {
+export function createTuningPanel(
+  onReset: () => void,
+  onChange?: (path: string) => void,
+): TuningPanel {
   // A hot reload re-runs this module without unloading the page, which would otherwise
   // leave the previous panel behind and stack a second one beside it.
   document.querySelectorAll('.tuning').forEach((stale) => stale.remove())
@@ -219,6 +229,7 @@ export function createTuningPanel(onReset: () => void): TuningPanel {
         const n = Number(slider.value)
         writePath(config as unknown as Nested, spec.path, n)
         show(n)
+        onChange?.(spec.path)
         save()
       })
       // Otherwise the focused slider swallows the arrow keys used to fly.
@@ -261,7 +272,7 @@ export function createTuningPanel(onReset: () => void): TuningPanel {
   const hint = document.createElement('p')
   hint.className = 'hint'
   hint.textContent =
-    'A / L pull each hand. Q / E reel line. R relaunch. V force vectors. T this panel.'
+    'A / L pull each hand. Q / E reel line. R relaunch. V force vectors. M mute. T this panel.'
   root.append(hint)
 
   document.body.append(root)

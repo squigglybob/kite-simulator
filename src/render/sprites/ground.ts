@@ -1,4 +1,5 @@
 import { fbm1D, hash1 } from '../../core/rng'
+import { SCENE_HEIGHT, scaled, scenery } from '../assets'
 import { C } from '../palette'
 import { getSprite } from '../spritecache'
 
@@ -149,6 +150,51 @@ function drawBeach(
 }
 
 /**
+ * The generated beach: dunes framing both edges, open sand stretched between them.
+ *
+ * The painting carries its own perspective, drawn for one viewpoint, so it cannot be
+ * projected as a real ground plane — it is fitted to the band below the horizon
+ * instead. Composing it from three pieces rather than using it whole is what lets the
+ * beach widen as the camera pulls back: the dunes stay pinned to the screen edges at a
+ * constant size, and only the sand between them grows.
+ */
+function drawBeachBitmap(ctx: CanvasRenderingContext2D, layout: GroundLayout): void {
+  const { duneLeft, duneRight, sand } = scenery
+  if (!duneLeft || !duneRight || !sand) return
+
+  const band = layout.height - layout.horizonY
+  if (band <= 0) return
+
+  const scale = band / SCENE_HEIGHT
+  const widthOf = (piece: HTMLCanvasElement) =>
+    Math.max(4, Math.round(piece.width * scale))
+
+  // Fill first: rounding can leave a piece a pixel short of an edge.
+  ctx.fillStyle = C.sand0
+  ctx.fillRect(0, layout.horizonY, layout.width, band)
+
+  // Open sand across the whole width, mirror-tiled so the repeat seam is symmetric
+  // rather than a hard edge. The dunes then cover both ends of it.
+  const sandTile = scaled('sand', sand, widthOf(sand))
+  for (let x = 0, i = 0; x < layout.width; x += sandTile.width, i++) {
+    if (i % 2 === 0) {
+      ctx.drawImage(sandTile, x, layout.horizonY)
+    } else {
+      ctx.save()
+      ctx.translate(x + sandTile.width, layout.horizonY)
+      ctx.scale(-1, 1)
+      ctx.drawImage(sandTile, 0, 0)
+      ctx.restore()
+    }
+  }
+
+  const left = scaled('duneLeft', duneLeft, widthOf(duneLeft))
+  const right = scaled('duneRight', duneRight, widthOf(duneRight))
+  ctx.drawImage(left, 0, layout.horizonY)
+  ctx.drawImage(right, layout.width - right.width, layout.horizonY)
+}
+
+/**
  * The coastline is expensive to draw — the sand speckle and sea glints touch every
  * pixel below the horizon and hash each one — but it only changes when the camera zoom
  * moves the horizon, so it is rasterised once per layout and blitted thereafter.
@@ -159,12 +205,20 @@ export function drawGround(
   layout: GroundLayout,
   scrollX: number,
 ): void {
-  const key = `ground:${layout.width}:${layout.height}:${layout.horizonY}:${layout.shoreY}:${Math.round(scrollX)}`
+  const hasArt = scenery.loaded
+  const source = hasArt ? 'beach' : 'drawn'
+  const key = `ground:${source}:${layout.width}:${layout.height}:${layout.horizonY}:${layout.shoreY}:${Math.round(scrollX)}`
+
   const sprite = getSprite(key, layout.width, layout.height, (target) => {
     drawHeadlands(target, layout, scrollX)
-    drawSea(target, layout)
-    drawSurf(target, layout, scrollX)
-    drawBeach(target, layout, scrollX)
+    if (hasArt) {
+      drawBeachBitmap(target, layout)
+    } else {
+      // Still drawn in code until the art loads, and if it never does.
+      drawSea(target, layout)
+      drawSurf(target, layout, scrollX)
+      drawBeach(target, layout, scrollX)
+    }
   })
   ctx.drawImage(sprite, 0, 0)
 }

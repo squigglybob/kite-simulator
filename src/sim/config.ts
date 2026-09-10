@@ -137,6 +137,10 @@ export interface Config {
     seaSparkle: number
     /** Flicker rate in steps per second. */
     seaSparkleRate: number
+    /** How far the grass tips bend, in source pixels at full wind. */
+    grassSway: number
+    /** Flutter rate in radians per second. */
+    grassRate: number
   }
   audio: {
     /** Ambient bed level, 0 to 1. */
@@ -214,6 +218,8 @@ export const config: Config = {
   scenery: {
     seaSparkle: 0.05,
     seaSparkleRate: 9,
+    grassSway: 9,
+    grassRate: 2.4,
   },
   audio: {
     volume: 0.55,

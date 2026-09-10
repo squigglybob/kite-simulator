@@ -94,6 +94,8 @@ const SECTIONS: Section[] = [
     sliders: [
       { path: 'scenery.seaSparkle', label: 'sea sparkle', min: 0, max: 0.3, step: 0.002 },
       { path: 'scenery.seaSparkleRate', label: 'sparkle rate', min: 1, max: 30, step: 0.5 },
+      { path: 'scenery.grassSway', label: 'grass sway px', min: 0, max: 30, step: 0.5 },
+      { path: 'scenery.grassRate', label: 'grass flutter', min: 0.2, max: 8, step: 0.1 },
     ],
   },
   {

@@ -192,8 +192,9 @@ function drawBeachBitmap(ctx: CanvasRenderingContext2D, layout: GroundLayout): v
     }
   }
 
-  const left = scaled('duneLeft', duneLeft, widthOf(duneLeft))
-  const right = scaled('duneRight', duneRight, widthOf(duneRight))
+  // Only the still part goes into the cache; the grass is drawn back on per frame.
+  const left = scaled('duneLeft', duneLeft.still, widthOf(duneLeft.still))
+  const right = scaled('duneRight', duneRight.still, widthOf(duneRight.still))
   ctx.drawImage(left, 0, layout.horizonY)
   ctx.drawImage(right, layout.width - right.width, layout.horizonY)
 }
@@ -252,6 +253,88 @@ export function drawSeaSparkle(
       ctx.fillRect(x, y, bright > 0.9 ? 2 : 1, 1)
     }
   }
+}
+
+/**
+ * Marram grass bending in the wind.
+ *
+ * Each clump is bent about *its own* roots. The dune has grass at the waterline and
+ * grass in the foreground, and bending the lot about the bottom of the image made the
+ * upper clumps slide across the sand rather than bend, because their roots were being
+ * treated as though they sat far below where they actually grow.
+ *
+ * Within a clump the bend is a gradient up its height — nothing at the base, most at
+ * the tips — drawn as a few horizontal bands, so the whole beach costs a bit over a
+ * hundred blits a frame and the coastline underneath stays cached.
+ *
+ * The bend is a steady lean plus a two-frequency flutter so it does not tick like a
+ * metronome, and it scales with the live wind. It never reverses: grass downwind of a
+ * steady breeze leans one way and trembles, it does not wave side to side.
+ *
+ * One honest liberty: the wind blows away from the camera, so grass leaning downwind
+ * would foreshorten to almost nothing. It leans sideways instead, which is the pixel
+ * art convention and the only version that reads at this size.
+ */
+export function drawSwayingGrass(
+  ctx: CanvasRenderingContext2D,
+  layout: GroundLayout,
+  time: number,
+  windSpeed: number,
+): void {
+  const { duneLeft, duneRight } = scenery
+  if (!duneLeft || !duneRight) return
+
+  const band = layout.height - layout.horizonY
+  if (band <= 0) return
+
+  const s = config.scenery
+  const scale = band / SCENE_HEIGHT
+  const chop = Math.min(windSpeed / 10, 1.6)
+  const flutter =
+    Math.sin(time * s.grassRate) * 0.7 + Math.sin(time * s.grassRate * 1.73 + 1.1) * 0.3
+  // Always positive, so the lean only ever varies in strength. An earlier version let
+  // this reach zero and skipped drawing entirely, which made the grass blink out of
+  // existence every time the flutter crossed over.
+  const bend = s.grassSway * scale * chop * (0.55 + 0.45 * flutter)
+
+  const draw = (dune: typeof duneLeft, key: string, alignRight: boolean) => {
+    const width = Math.max(4, Math.round(dune.grass.width * scale))
+    const sprite = scaled(key, dune.grass, width)
+    const originX = alignRight ? layout.width - sprite.width : 0
+    // Taken from the sprite itself rather than recomputed, so rounding in the
+    // downsample cannot drift the tuft boxes off the grass they describe.
+    const sx = sprite.width / dune.grass.width
+    const sy = sprite.height / dune.grass.height
+
+    for (const tuft of dune.tufts) {
+      const left = Math.floor(tuft.x * sx)
+      const tuftWidth = Math.max(1, Math.ceil(tuft.width * sx))
+      const top = Math.floor(tuft.y * sy)
+      const tuftHeight = Math.max(1, Math.ceil(tuft.height * sy))
+      const roots = top + tuftHeight
+      const step = tuftHeight <= 8 ? 2 : 3
+
+      for (let y = top; y < roots; y += step) {
+        const rows = Math.min(step, roots - y)
+        const up = (roots - y) / tuftHeight
+        const dx = Math.round(bend * Math.pow(up, 1.6))
+        ctx.drawImage(
+          sprite,
+          left,
+          y,
+          tuftWidth,
+          rows,
+          originX + left + dx,
+          layout.horizonY + y,
+          tuftWidth,
+          rows,
+        )
+      }
+    }
+  }
+
+  draw(duneLeft, 'grassLeft', false)
+  draw(duneRight, 'grassRight', true)
 }
 
 export function drawGround(

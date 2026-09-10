@@ -35,9 +35,47 @@ const DUNE_RIGHT = { x: 866, width: 313 }
  */
 const SAND_CROP = { x: 2, width: 635 }
 
+/**
+ * Marram grass, in the six greens the painting actually uses. Matched exactly rather
+ * than by a "looks green" test, because the sea's teal and the surf's pale foam both
+ * pass that and would end up swaying along with the grass.
+ */
+const GRASS_COLOURS = new Set([
+  0x165a4c, 0x229062, 0x547e64, 0x92a884, 0x90db68, 0xb2ba90,
+  // The two darkest greens are the shaded bases of the tufts. Left behind they read
+  // as black stubble once the rest of the blade has moved off them.
+  0x364e4a, 0x303638,
+])
+/** No grass grows in the water, so nothing above the sand line is considered. */
+const GRASS_FIRST_ROW = 34
+
+/**
+ * One clump of grass, found as a connected island in the mask.
+ *
+ * Each tuft is bent about *its own* base. Treating the whole dune as one mass and
+ * bending it about the bottom of the image made the clumps growing part-way up the
+ * dune slide bodily sideways, because their roots were being treated as though they
+ * were metres below where they actually are.
+ */
+export interface Tuft {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface Dune {
+  /** Everything that is not grass, with the grass painted out behind it. */
+  still: HTMLCanvasElement
+  /** Only the grass, on transparency, to be drawn back on top with a bend in it. */
+  grass: HTMLCanvasElement
+  /** Individual clumps, each with the row its own roots sit on. */
+  tufts: Tuft[]
+}
+
 export interface SceneryAssets {
-  duneLeft: HTMLCanvasElement | null
-  duneRight: HTMLCanvasElement | null
+  duneLeft: Dune | null
+  duneRight: Dune | null
   sand: HTMLCanvasElement | null
   loaded: boolean
 }
@@ -157,6 +195,129 @@ export function scaled(
 }
 
 /**
+ * Splits a dune into the part that stays put and the grass that moves.
+ *
+ * The grass cannot simply be drawn on top of the untouched dune — shifting it sideways
+ * would leave the original showing through as a ghost. So it is painted out of the
+ * still layer first, each grass pixel taking the colour of whatever is below it in its
+ * column. Grass grows out of sand, so what is below it is nearly always the sand it
+ * grows from, and the repair is invisible.
+ */
+function splitDune(source: HTMLCanvasElement): Dune {
+  const { width, height } = source
+  const from = source.getContext('2d', { willReadFrequently: true })
+  if (!from) throw new Error('2D context unavailable while splitting a dune')
+  const data = from.getImageData(0, 0, width, height)
+  const px = data.data
+
+  const [grassCanvas, grassCtx] = canvasOf(width, height)
+  const grassData = grassCtx.createImageData(width, height)
+  const gp = grassData.data
+
+  let grassTop = height
+  let grassBottom = -1
+
+  for (let x = 0; x < width; x++) {
+    // Bottom upward, carrying the last non-grass colour so grass is filled with the
+    // sand beneath it rather than with whatever happens to be above.
+    let fillR = 0xfd
+    let fillG = 0xcb
+    let fillB = 0xb0
+    for (let y = height - 1; y >= 0; y--) {
+      const i = (y * width + x) * 4
+      const rgb = (px[i] << 16) | (px[i + 1] << 8) | px[i + 2]
+      const isGrass = y >= GRASS_FIRST_ROW && GRASS_COLOURS.has(rgb)
+
+      if (!isGrass) {
+        fillR = px[i]
+        fillG = px[i + 1]
+        fillB = px[i + 2]
+        continue
+      }
+
+      gp[i] = px[i]
+      gp[i + 1] = px[i + 1]
+      gp[i + 2] = px[i + 2]
+      gp[i + 3] = 255
+
+      px[i] = fillR
+      px[i + 1] = fillG
+      px[i + 2] = fillB
+
+      if (y < grassTop) grassTop = y
+      if (y > grassBottom) grassBottom = y
+    }
+  }
+
+  const [stillCanvas, stillCtx] = canvasOf(width, height)
+  stillCtx.putImageData(data, 0, 0)
+  grassCtx.putImageData(grassData, 0, 0)
+
+  return {
+    still: stillCanvas,
+    grass: grassCanvas,
+    tufts: findTufts(grassData),
+  }
+}
+
+/**
+ * Finds each separate clump of grass, so every one can bend about its own roots.
+ * Same flood fill as any connected-component pass, iterative because a recursive one
+ * would overflow the stack on a full dune.
+ */
+function findTufts(mask: ImageData): Tuft[] {
+  const { width, height } = mask
+  const px = mask.data
+  const seen = new Uint8Array(width * height)
+  const stack: number[] = []
+  const tufts: Tuft[] = []
+
+  for (let start = 0; start < seen.length; start++) {
+    if (seen[start] || px[start * 4 + 3] === 0) continue
+
+    stack.length = 0
+    stack.push(start)
+    seen[start] = 1
+    let minX = width
+    let minY = height
+    let maxX = -1
+    let maxY = -1
+    let area = 0
+
+    while (stack.length) {
+      const index = stack.pop() as number
+      const x = index % width
+      const y = (index - x) / width
+      area++
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+          const n = ny * width + nx
+          if (seen[n] || px[n * 4 + 3] === 0) continue
+          seen[n] = 1
+          stack.push(n)
+        }
+      }
+    }
+
+    // Single stray pixels are mask noise, not blades.
+    if (area >= 12) {
+      tufts.push({ x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 })
+    }
+  }
+
+  return tufts
+}
+
+/**
  * Kicks off loading. The game runs without any of this — the procedural coastline is
  * drawn until the bitmaps arrive, and stays if they never do.
  */
@@ -178,8 +339,8 @@ export async function loadScenery(): Promise<void> {
     return canvas
   }
 
-  scenery.duneLeft = cut(wide, DUNE_LEFT.x, DUNE_LEFT.width)
-  scenery.duneRight = cut(wide, DUNE_RIGHT.x, DUNE_RIGHT.width)
+  scenery.duneLeft = splitDune(cut(wide, DUNE_LEFT.x, DUNE_LEFT.width))
+  scenery.duneRight = splitDune(cut(wide, DUNE_RIGHT.x, DUNE_RIGHT.width))
   scenery.sand = cut(beach, SAND_CROP.x, SAND_CROP.width)
   scenery.loaded = true
 }

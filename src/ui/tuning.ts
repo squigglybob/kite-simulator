@@ -286,7 +286,7 @@ export function createTuningPanel(
   const hint = document.createElement('p')
   hint.className = 'hint'
   hint.textContent =
-    'A / L pull each hand. Q / E reel line. R relaunch. V force vectors. M mute. T this panel.'
+    'A / L hands. Q / E line. R relaunch. W wind window. H readout. V vectors. M mute. T panel.'
   root.append(hint)
 
   document.body.append(root)

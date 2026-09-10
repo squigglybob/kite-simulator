@@ -23,6 +23,7 @@ import { windAt } from './sim/wind'
 import { sagDepth } from './sim/line'
 import { World } from './sim/world'
 import { drawHud } from './ui/hud'
+import { drawWindWindow } from './ui/windwindow'
 import { createTuningPanel, loadSavedConfig } from './ui/tuning'
 import { drawForceVectors } from './ui/vectors'
 
@@ -59,6 +60,12 @@ const panel = createTuningPanel(
   },
 )
 let showVectors = false
+let showDebug = true
+let showWindow = false
+
+/** Best height survives a reload, so it is worth beating rather than just a counter. */
+const BEST_KEY = 'kite-flyer.best'
+let best = Number(localStorage.getItem(BEST_KEY) ?? 0) || 0
 
 input.onPress('KeyR', () => {
   world.reset()
@@ -67,6 +74,8 @@ input.onPress('KeyR', () => {
 input.onPress('KeyV', () => (showVectors = !showVectors))
 input.onPress('KeyT', () => panel.toggle())
 input.onPress('KeyM', () => ambience.toggleMute())
+input.onPress('KeyH', () => (showDebug = !showDebug))
+input.onPress('KeyW', () => (showWindow = !showWindow))
 
 /** World-space distance to the waterline. Fixes where sea meets sand on screen. */
 const SHORE_DISTANCE = 45
@@ -195,8 +204,19 @@ function render(alpha: number, frameTime: number): void {
   drawString(handScreen, towWorld)
   kiteRenderer.drawBridle(ctx, camera, kite, kiteWorld)
 
+  if (showWindow) drawWindWindow(ctx, camera, world)
   if (showVectors) drawForceVectors(ctx, kite, camera)
-  drawHud(ctx, world, Math.round(1 / smoothedFrameTime), camera.zoom)
+
+  if (world.stats.maxAltitude > best) {
+    best = world.stats.maxAltitude
+    localStorage.setItem(BEST_KEY, String(Math.round(best)))
+  }
+  drawHud(ctx, world, {
+    fps: Math.round(1 / smoothedFrameTime),
+    zoom: camera.zoom,
+    best,
+    showDebug,
+  })
 
   screen.present()
 }

@@ -62,9 +62,14 @@ export function windAt(pos: Vec3, time: number, out: Vec3 = v3()): Vec3 {
  * wingtip harder than the other is what starts the swing.
  */
 export function lateralGustGradient(pos: Vec3, time: number, span: number): number {
-  const s = 1 / config.wind.gustCellSize
-  const t = time * config.wind.gustTimeScale
+  // Scaled by the gust amplitude like everything else in the field. Without this it
+  // kept applying a rolling torque with the gusts turned right down, which made the
+  // kite drift in conditions that were supposed to be dead calm.
+  const w = config.wind
+  if (w.gustAmp <= 0) return 0
+  const s = 1 / w.gustCellSize
+  const t = time * w.gustTimeScale
   const left = noiseZ((pos.x - span) * s, pos.y * s, pos.z * s + t)
   const right = noiseZ((pos.x + span) * s, pos.y * s, pos.z * s + t)
-  return right - left
+  return (right - left) * w.gustAmp
 }

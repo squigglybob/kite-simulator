@@ -40,14 +40,33 @@ export interface Config {
      */
     bridleUpper: number
     bridleLower: number
-    /** Aerodynamic restoring moment toward trim. Scales with dynamic pressure, so a
-     *  kite with no airflow over it has no pitch authority and wanders. */
-    pitchStiffness: number
-    /** Damping as a fraction of critical, not an absolute coefficient. Critical damping
-     *  depends on dynamic pressure, so a fixed coefficient is badly underdamped in the
-     *  wind speeds that matter and the kite flip-flops in pitch at several hertz. */
-    pitchDampRatio: number
-    pitchInertia: number
+    /**
+     * Where the centre of pressure sits along the spine, in spine-lengths from the
+     * centre, as `base + slope * sin(alpha)`. Its travel with incidence is what makes
+     * pitch self-correcting: the kite trims to wherever the pressure lines up with the
+     * bridle's tow point, so the two together set the flying angle.
+     */
+    cpBase: number
+    cpSlope: number
+    /** Multiplier on the thin-plate moments of inertia. Higher is a heavier, slower
+     *  turn — spars, tail and hem all add rotational mass a flat plate does not have. */
+    inertiaScale: number
+    /** The tail's drag area in square metres, and how far behind the centre of mass
+     *  it acts, in spine-lengths. Being on a lever arm is what makes it *restore*
+     *  attitude and not merely damp it — and it stops working in still air, which is
+     *  what lets a stalled kite tumble. */
+    tailDrag: number
+    tailArm: number
+    /** Tail weight per metre of length. Gravity on this, out on the tail's arm, is a
+     *  pendulum holding the kite upright — and unlike the aerodynamic terms it keeps
+     *  working when the wind drops. Multiplied by `tailLength`, so the tail you can
+     *  see is the tail that steadies the kite. */
+    tailMassPerMetre: number
+    /** The kite's own surface resisting rotation — a large moment for a flat plate,
+     *  and the main thing keeping pitch from slowly diverging. Needs airflow. */
+    aeroDamping: number
+    /** A trace of always-on damping, so a kite turning in dead air eventually stops. */
+    spinDamping: number
     /** Angle of attack at which lift collapses, degrees. */
     stallDeg: number
     /** Degrees over which the stall blends in. */
@@ -56,13 +75,7 @@ export interface Config {
     cdScale: number
     /** Parasitic drag at zero angle of attack. */
     cd0: number
-    rollInertia: number
-    /** As `pitchDampRatio`: a fraction of critical, not an absolute coefficient. */
-    rollDampRatio: number
-    /** Aerodynamic roll restoring strength — the tail. Scales with dynamic pressure,
-     *  so it vanishes when the kite stalls. That is what makes a stall turn into a dive. */
-    tailStrength: number
-    /** Roll disturbance from the gust field. */
+    /** Roll disturbance from the gust field, as a torque about the spine. */
     rollGustGain: number
     /** Drawn size relative to true size. Purely visual — the physics always uses the
      *  real area. A kite 30 m away is honestly only a few pixels across, which is
@@ -148,7 +161,7 @@ export const config: Config = {
     gravity: 9.81,
   },
   wind: {
-    base: 6,
+    base: 9,
     shear: 0.14,
     refHeight: 10,
     gustAmp: 1.6,
@@ -162,18 +175,20 @@ export const config: Config = {
     area: 0.6,
     bridleUpper: 0.467,
     bridleLower: 0.413,
-    pitchStiffness: 5.5,
-    pitchDampRatio: 1,
-    pitchInertia: 0.05,
+    cpBase: -0.16,
+    cpSlope: -0.3,
+    inertiaScale: 2.5,
+    tailDrag: 0.02,
+    tailArm: 1.2,
+    tailMassPerMetre: 0.04,
+    aeroDamping: 0.35,
+    spinDamping: 0.03,
     stallDeg: 16,
     stallBlendDeg: 9,
     clScale: 1,
     cdScale: 1,
     cd0: 0.1,
-    rollInertia: 0.06,
-    rollDampRatio: 0.9,
-    tailStrength: 2.4,
-    rollGustGain: 0.5,
+    rollGustGain: 0.02,
     visualScale: 2.2,
     aspect: 1.5,
     tailLength: 3.5,

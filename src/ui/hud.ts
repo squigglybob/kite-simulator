@@ -29,7 +29,7 @@ export function drawHud(
     `aoa     ${(d.alpha * DEG).toFixed(1)} deg${d.stalled ? '  STALL' : ''}`,
     `tension ${d.line.tension.toFixed(1)} N`,
     `air     ${d.airspeed.toFixed(1)} m/s`,
-    `roll    ${(kite.roll * DEG).toFixed(0)} deg`,
+    `roll    ${(d.roll * DEG).toFixed(0)} deg`,
   ]
 
   const right = [

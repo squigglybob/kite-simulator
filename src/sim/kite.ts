@@ -7,10 +7,10 @@ import {
   add,
   addScaledInPlace,
   copy,
+  cross,
   dot,
   length,
   normalize,
-  rotateAbout,
   scale,
   sub,
   v3,
@@ -18,41 +18,57 @@ import {
 } from '../core/vec3'
 
 /**
- * The kite: a point mass with one rotational degree of freedom.
+ * The kite: a rigid body with six degrees of freedom.
  *
- * Attitude is built from the *apparent wind*, not the line: a kite weathercocks into
- * the airflow rather than hanging rigidly off its string. Angle of attack is therefore
- * a state variable, pitching on a damped spring toward the trim angle the bridle sets.
- * The line's job is to hold the kite in place against the resulting force, which is
- * what makes it settle where tan(elevation) = lift/drag.
+ * It carries an orientation and an angular velocity, and turns because torques act on
+ * it — not because an angle is being steered toward a target. That distinction is the
+ * whole point. A body with angular momentum cannot flip: reversing its attitude means
+ * first arresting the rotation it already has, which takes time and torque. Rotation
+ * accelerates, coasts and decelerates, the way a real kite's does.
  *
- * Two DOFs beyond position: pitch (angle of attack) and roll about the wind axis. Both
- * restoring terms scale with dynamic pressure, because a plate with no airflow over it
- * has no aerodynamic authority. That is the whole mechanism behind a stall turning into
- * a dive — lift collapses, the tail stops working, roll runs away, and the kite falls
- * off on one side. None of that is scripted.
+ * Three torques do all the work:
+ *
+ * - **Aerodynamic**, applied not at the centre of mass but at the centre of pressure,
+ *   which slides along the spine as the angle of attack changes. That offset is what
+ *   makes pitch self-correcting.
+ * - **The line**, pulling at the bridle's tow point, which stands off the face and
+ *   forward of centre. This is the bridle physically doing its job — the trim angle is
+ *   no longer a number anyone types in, it is wherever those two torques cancel.
+ * - **The tail**, as damping that scales with dynamic pressure. A tail in still air
+ *   does nothing, so a stalled kite keeps whatever rotation it had and tumbles.
+ *
+ * Orientation is stored as three orthonormal axes rather than a quaternion. At 240 Hz
+ * the drift is tiny, one Gram-Schmidt pass a step removes it, and the renderer wants
+ * the axes anyway.
  */
 
 const DEG = Math.PI / 180
-const HALF_PI = Math.PI / 2
 const WORLD_UP: Vec3 = { x: 0, y: 1, z: 0 }
 const GROUND_Y = 0.15
-/** Backstop on kite speed. Nothing physical should approach this. */
+/** Backstops. Nothing physical should approach either. */
 const MAX_SPEED = 90
+const MAX_SPIN = 40
 
 export interface KiteDiagnostics {
   apparent: Vec3
   windDir: Vec3
   airspeed: number
-  /** Angle of attack, radians. */
+  /** Angle of attack, radians. Measured from the orientation, no longer a state. */
   alpha: number
   lift: Vec3
   drag: Vec3
   tensionForce: Vec3
+  /** Leeward face normal: the direction the aerodynamic force pushes. */
   normal: Vec3
+  /** Centre toward the nose, in world space. */
+  nose: Vec3
+  /** Wingtip to wingtip, in world space. */
+  span: Vec3
   line: LineState
   elevation: number
   azimuth: number
+  /** Bank angle for the instrument readout, radians. */
+  roll: number
   stalled: boolean
 }
 
@@ -61,11 +77,14 @@ export class Kite {
   /** Position at the start of the current step, for render interpolation. */
   prevPos: Vec3 = v3()
   vel: Vec3 = v3()
-  /** Angle of attack, radians. A state variable, not a derived quantity. */
-  alpha = 0
-  alphaRate = 0
-  roll = 0
-  rollRate = 0
+
+  /** Orientation, as three orthonormal world-space axes. */
+  nose: Vec3 = v3(0, 1, 0)
+  span: Vec3 = v3(1, 0, 0)
+  normal: Vec3 = v3(0, 0, 1)
+  /** Angular velocity in world space, radians per second. */
+  spin: Vec3 = v3()
+
   crashed = false
 
   diag: KiteDiagnostics = {
@@ -76,162 +95,272 @@ export class Kite {
     lift: v3(),
     drag: v3(),
     tensionForce: v3(),
-    normal: v3(),
+    normal: v3(0, 0, 1),
+    nose: v3(0, 1, 0),
+    span: v3(1, 0, 0),
     line: { dir: v3(0, 1, 0), distance: 0, extension: 0, tension: 0 },
     elevation: 0,
     azimuth: 0,
+    roll: 0,
     stalled: false,
   }
 
+  /** Spine and span in metres, from the area and aspect the player has set. */
+  private dimensions(): { spine: number; span: number } {
+    const area = 2 * config.kite.area
+    const aspect = Math.max(config.kite.aspect, 0.2)
+    return { spine: Math.sqrt(area * aspect), span: Math.sqrt(area / aspect) }
+  }
+
   /** Place the kite downwind at a low elevation, as if just launched. */
-  reset(handPos: Vec3, elevationDeg = 28): void {
+  reset(handPos: Vec3, elevationDeg = 38): void {
     const e = elevationDeg * DEG
     const r = config.line.length * 0.98
     this.pos = add(handPos, v3(0, Math.sin(e) * r, Math.cos(e) * r))
     this.prevPos = copy(this.pos)
     this.vel = v3()
-    this.alpha = bridleGeometry().angle * 0.4
-    this.alphaRate = 0
-    this.roll = 0
-    this.rollRate = 0
+    this.spin = v3()
     this.crashed = false
+
+    // Launched at its trim angle, the way someone holds a kite up into the wind before
+    // letting go — not square to the line, which is 60 degrees of incidence and deeply
+    // stalled. The flat-plate curves have a second, stalled equilibrium at high
+    // incidence, and a kite that starts there cannot always climb out of it: with any
+    // gust running it just sits at 30 degrees making no lift.
+    const bridle = bridleGeometry()
+    const trimSin = Math.max(
+      -0.9,
+      Math.min((bridle.along - config.kite.cpBase) / config.kite.cpSlope, 0.9),
+    )
+    const trim = Math.asin(trimSin)
+
+    const flow = normalize(windAt(this.pos, 0))
+    this.span = normalize(cross(WORLD_UP, flow))
+    // Face mostly upward, tipped so the airflow meets it at exactly the trim angle.
+    const lift = normalize(cross(flow, this.span))
+    this.normal = normalize(
+      add(scale(lift, Math.cos(trim)), scale(flow, Math.sin(trim))),
+    )
+    this.nose = cross(this.normal, this.span)
+    this.orthonormalise()
+  }
+
+  /** Removes the drift that integrating three axes separately accumulates. */
+  private orthonormalise(): void {
+    this.nose = normalize(this.nose)
+    let span = sub(this.span, scale(this.nose, dot(this.span, this.nose)))
+    if (length(span) < 0.3) {
+      // Axes collapsed onto each other; rebuild the span from any transverse direction.
+      const fallback = Math.abs(this.nose.y) > 0.9 ? v3(1, 0, 0) : WORLD_UP
+      span = cross(fallback, this.nose)
+    }
+    this.span = normalize(span)
+    this.normal = normalize(cross(this.span, this.nose))
   }
 
   step(dt: number, handPos: Vec3, time: number): void {
     const k = config.kite
     this.prevPos = copy(this.pos)
 
+    const size = this.dimensions()
     const wind = windAt(this.pos, time)
     const apparent = sub(wind, this.vel)
     const airspeed = length(apparent)
     const line = solveLine(this.pos, handPos, this.vel)
-
-    // --- Pitch ----------------------------------------------------------------
-    // The bridle holds a fixed angle between the line and the kite's chord, so the
-    // incidence the kite presents is *geometric*: it is that bridle angle less the
-    // angle between the line and the airflow. A kite low in the window therefore runs
-    // at a high angle of attack — near stall, poor lift, high drag — and one near the
-    // zenith runs nearly flat. That is what a real kite does, and it is what makes the
-    // elevation self-correcting: climbing reduces incidence, which reduces lift.
-    //
-    // Angle of attack stays a state on a damped spring toward that geometric target
-    // rather than snapping to it, which preserves the lag that lets a gust push the
-    // kite transiently past the stall.
     const q = dynamicPressure(airspeed)
 
-    let target = bridleGeometry().angle
-    if (airspeed > 0.05) {
-      const toWind = Math.acos(
-        Math.max(-1, Math.min(1, dot(line.dir, scale(apparent, 1 / airspeed)))),
-      )
-      target -= toWind
-    }
-    // Kept off the extremes: a negative target flies the kite inverted into the ground,
-    // and beyond edge-on the flat-plate curves stop meaning anything.
-    target = Math.max(-2 * DEG, Math.min(target, 70 * DEG))
-
-    // Damping is expressed as a fraction of critical rather than an absolute
-    // coefficient, because critical damping scales with dynamic pressure: a fixed
-    // coefficient that feels right in a stiff breeze is badly underdamped elsewhere,
-    // and the kite oscillates in pitch at several hertz.
-    const pitchRate = k.pitchStiffness * q
-    const pitchCritical = 2 * Math.sqrt(Math.max(pitchRate * k.pitchInertia, 1e-9))
-    const pitchMoment =
-      pitchRate * (target - this.alpha) - k.pitchDampRatio * pitchCritical * this.alphaRate
-    this.alphaRate += (pitchMoment / k.pitchInertia) * dt
-    this.alpha += this.alphaRate * dt
-    this.alpha = Math.max(-HALF_PI, Math.min(HALF_PI, this.alpha))
-
-    // --- Attitude ---------------------------------------------------------------
-    // Built from the apparent wind: the kite weathercocks into the airflow. `windUp` is
-    // the lift direction at zero bank; tilting the normal off it by alpha sets the
-    // incidence, and rolling about the wind axis banks the lift vector sideways.
+    // --- Angle of attack, measured rather than steered -------------------------
     let windDir = v3(0, 0, 1)
-    let normal = v3(0, 1, 0)
-    let liftDir = v3(0, 1, 0)
-
+    let alpha = 0
     let lift = v3()
     let drag = v3()
 
     if (airspeed > 0.05) {
       windDir = scale(apparent, 1 / airspeed)
+      // `normal` is the leeward face — the side lift pulls toward — so the flow has a
+      // positive component along it at positive incidence.
+      alpha = Math.asin(Math.max(-1, Math.min(1, dot(windDir, this.normal))))
 
-      let windUp = sub(WORLD_UP, scale(windDir, dot(WORLD_UP, windDir)))
-      windUp =
-        length(windUp) > 1e-4
-          ? normalize(windUp)
-          : normalize(sub(line.dir, scale(windDir, dot(line.dir, windDir))))
-      windUp = rotateAbout(windUp, windDir, this.roll)
-
-      liftDir = windUp
-      normal = add(scale(windUp, Math.cos(this.alpha)), scale(windDir, -Math.sin(this.alpha)))
-
-      lift = scale(liftDir, q * liftCoefficient(this.alpha) * k.clScale)
+      // Lift acts square to the airflow, on the side the leeward face looks toward.
+      const perpendicular = sub(this.normal, scale(windDir, dot(this.normal, windDir)))
+      const perpLength = length(perpendicular)
+      if (perpLength > 1e-4) {
+        lift = scale(
+          perpendicular,
+          (q * liftCoefficient(alpha) * k.clScale) / perpLength,
+        )
+      }
 
       const lineDragArea = config.line.length * config.line.dragPerMetre
-      const lineDrag =
-        0.5 * config.env.airDensity * airspeed * airspeed * lineDragArea
-      drag = scale(windDir, q * dragCoefficient(this.alpha) * k.cdScale + lineDrag)
+      const lineDrag = 0.5 * config.env.airDensity * airspeed * airspeed * lineDragArea
+      drag = scale(windDir, q * dragCoefficient(alpha) * k.cdScale + lineDrag)
     }
 
+    const aero = add(lift, drag)
     const tensionForce = scale(line.dir, -line.tension)
 
-    // --- Integrate translation ----------------------------------------------
-    const force = add(add(lift, drag), tensionForce)
+    // --- Forces ------------------------------------------------------------------
+    const force = add(aero, tensionForce)
     force.y -= k.mass * config.env.gravity
 
+    // --- Torques -------------------------------------------------------------------
+    // The centre of pressure slides toward the *trailing* edge as incidence rises,
+    // which on a kite is the tail, so `cpSlope` is negative. Because the line is
+    // anchored at a fixed point, that travel is what restores pitch: too much
+    // incidence walks the pressure behind the tow point and the nose comes back down.
+    const cpAlong = (k.cpBase + k.cpSlope * Math.sin(alpha)) * size.spine
+    const torque = cross(scale(this.nose, cpAlong), aero)
+
+    const bridle = bridleGeometry()
+    const towPoint = add(
+      scale(this.nose, bridle.along * size.spine),
+      // The bridle stands off the windward face, which is opposite the normal.
+      scale(this.normal, -bridle.standoff * size.spine),
+    )
+    addScaledInPlace(torque, cross(towPoint, tensionForce), 1)
+
+    // The tail hangs behind and below on a lever arm, and its *weight* is a pendulum:
+    // gravity pulling on it keeps the kite the right way up. Unlike everything else
+    // holding the attitude, this needs no airflow at all, so it is still working when
+    // the wind drops and every aerodynamic term has gone quiet. Its mass comes from
+    // the tail length you can see, so a longer tail really is a steadier kite.
+    const tailArmLength = k.tailArm * size.spine
+    const tailPoint = scale(this.nose, -tailArmLength)
+    const tailMass = Math.max(0, config.kite.tailLength * k.tailMassPerMetre)
+    if (tailMass > 0) {
+      const weight = v3(0, -tailMass * config.env.gravity, 0)
+      addScaledInPlace(force, weight, 1)
+      addScaledInPlace(torque, cross(tailPoint, weight), 1)
+    }
+
+    // The tail, modelled as what it physically is: a drag device on the end of a lever.
+    // Because it is offset behind the centre of mass, its drag both damps rotation and
+    // *restores* it — any yaw or pitch away from the airflow swings the tail sideways
+    // into the wind and it is pushed straight again. A damping-only term could never do
+    // that, which is why the kite kept drifting into a slow yaw and falling out.
+    const tailAt = tailPoint
+    const tailAir = sub(wind, add(this.vel, cross(this.spin, tailAt)))
+    const tailSpeed = length(tailAir)
+    if (tailSpeed > 1e-3 && k.tailDrag > 0) {
+      const tailForce = scale(
+        tailAir,
+        0.5 * config.env.airDensity * tailSpeed * k.tailDrag,
+      )
+      addScaledInPlace(force, tailForce, 1)
+      addScaledInPlace(torque, cross(tailAt, tailForce), 1)
+    }
+
+    // The kite's own surface resists rotation: turning about the span sweeps the nose
+    // and tail through the air in opposite directions, and the pressure difference
+    // opposes the turn. This is a large moment for a flat plate and leaving it out is
+    // what let a well-trimmed kite slowly diverge in pitch and fall out of the sky.
+    // Like every other aerodynamic term it needs airflow, so it fades with airspeed.
+    if (airspeed > 0.05) {
+      const damp = (k.aeroDamping * q) / Math.max(airspeed, 0.5)
+      const chord = size.spine * size.spine
+      const width = size.span * size.span
+      addScaledInPlace(torque, this.span, -damp * chord * dot(this.spin, this.span))
+      addScaledInPlace(torque, this.nose, -damp * width * dot(this.spin, this.nose))
+      addScaledInPlace(
+        torque,
+        this.normal,
+        -damp * (chord + width) * dot(this.spin, this.normal),
+      )
+    }
+
+    // A trace of always-on damping, so a kite tumbling in dead air eventually settles
+    // rather than spinning for ever.
+    addScaledInPlace(torque, this.spin, -k.spinDamping)
+
+    // A gust that catches one wingtip harder than the other rolls the kite. The point
+    // force model cannot produce that on its own, so it is added directly.
+    addScaledInPlace(
+      torque,
+      this.nose,
+      lateralGustGradient(this.pos, time, size.span * 0.5) * k.rollGustGain * q,
+    )
+
+    // --- Integrate -------------------------------------------------------------------
     const invMass = 1 / k.mass
     addScaledInPlace(this.vel, force, dt * invMass)
 
     const speed = length(this.vel)
     if (speed > MAX_SPEED) this.vel = scale(this.vel, MAX_SPEED / speed)
-
     addScaledInPlace(this.pos, this.vel, dt)
+
+    // Thin-plate moments of inertia, one per body axis. The gyroscopic coupling term is
+    // left out: at these rates it is far below the aerodynamic torques.
+    const scaleI = (k.mass / 12) * k.inertiaScale
+    // The tail's mass out on its arm is a real part of how hard the kite is to turn,
+    // and about both axes the arm swings through. On the spine itself it contributes
+    // nothing, which is why roll is left alone.
+    const tailSwing = tailMass * tailArmLength * tailArmLength
+    const rollInertia = Math.max(scaleI * size.span * size.span, 1e-6)
+    const pitchInertia = Math.max(scaleI * size.spine * size.spine + tailSwing, 1e-6)
+    const yawInertia = Math.max(
+      scaleI * (size.spine * size.spine + size.span * size.span) + tailSwing,
+      1e-6,
+    )
+
+    const angularAcceleration = add(
+      add(
+        scale(this.nose, dot(torque, this.nose) / rollInertia),
+        scale(this.span, dot(torque, this.span) / pitchInertia),
+      ),
+      scale(this.normal, dot(torque, this.normal) / yawInertia),
+    )
+    addScaledInPlace(this.spin, angularAcceleration, dt)
+
+    const spinRate = length(this.spin)
+    if (spinRate > MAX_SPIN) this.spin = scale(this.spin, MAX_SPIN / spinRate)
+
+    // Rotate each axis by the angular velocity. Valid for small steps, and 240 Hz is
+    // very small; the orthonormalise below mops up what error remains.
+    addScaledInPlace(this.nose, cross(this.spin, this.nose), dt)
+    addScaledInPlace(this.span, cross(this.spin, this.span), dt)
+    this.orthonormalise()
 
     if (this.pos.y < GROUND_Y) {
       this.pos.y = GROUND_Y
       if (this.vel.y < 0) this.vel.y = 0
       this.vel.x *= 0.7
       this.vel.z *= 0.7
+      this.spin = scale(this.spin, 0.6)
       this.crashed = true
     } else if (this.pos.y > GROUND_Y + 0.5) {
       this.crashed = false
     }
 
-    // --- Integrate roll -------------------------------------------------------
-    // Every term scales with dynamic pressure, because a tail in dead air does
-    // nothing. That is deliberate: it is what turns a stall into a dive.
-    const rollRateConstant = k.tailStrength * q
-    const rollCritical = 2 * Math.sqrt(Math.max(rollRateConstant * k.rollInertia, 1e-9))
-    const restoring = -rollRateConstant * Math.sin(this.roll)
-    const disturbance =
-      lateralGustGradient(this.pos, time, 0.8) * k.rollGustGain * q
-    const damping = -k.rollDampRatio * rollCritical * this.rollRate
-    this.rollRate += ((restoring + disturbance + damping) / k.rollInertia) * dt
-    this.roll += this.rollRate * dt
-    this.roll = Math.max(-Math.PI, Math.min(Math.PI, this.roll))
-
-    // A NaN anywhere in the state is permanent — it propagates through every later
-    // step and the game never recovers. Relaunch instead of wedging.
-    if (!Number.isFinite(this.pos.x + this.pos.y + this.pos.z + this.roll)) {
+    // A non-finite state is permanent — it propagates through every later step and the
+    // game never recovers. Relaunch instead of wedging.
+    if (
+      !Number.isFinite(
+        this.pos.x + this.pos.y + this.pos.z + this.nose.y + this.spin.x,
+      )
+    ) {
       this.reset(handPos)
       return
     }
 
-    // --- Diagnostics ----------------------------------------------------------
+    // --- Diagnostics ------------------------------------------------------------------
     const rel = sub(this.pos, handPos)
     const d = this.diag
     d.apparent = apparent
     d.windDir = windDir
     d.airspeed = airspeed
-    d.alpha = this.alpha
+    d.alpha = alpha
     d.lift = lift
     d.drag = drag
     d.tensionForce = tensionForce
-    d.normal = normal
+    d.normal = this.normal
+    d.nose = this.nose
+    d.span = this.span
     d.line = line
-    d.elevation = Math.asin(Math.max(-1, Math.min(1, rel.y / Math.max(line.distance, 1e-4))))
+    d.elevation = Math.asin(
+      Math.max(-1, Math.min(1, rel.y / Math.max(line.distance, 1e-4))),
+    )
     d.azimuth = Math.atan2(rel.x, rel.z)
-    d.stalled = Math.abs(this.alpha) > k.stallDeg * DEG
+    d.roll = Math.asin(Math.max(-1, Math.min(1, dot(this.span, WORLD_UP))))
+    d.stalled = Math.abs(alpha) > k.stallDeg * DEG
   }
 }

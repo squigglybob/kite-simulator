@@ -94,18 +94,6 @@ export interface Config {
     aspect: number
     /** Tail length in metres, before `visualScale` is applied. */
     tailLength: number
-    /**
-     * Floor on how far the *drawn* kite is pitched from flat, degrees. Compensation for
-     * the camera looking horizontally at a kite well above the horizon: a real viewer
-     * tilts their head up and sees the kite face-on, this camera cannot, so an honest
-     * attitude presents edge-on and vanishes.
-     *
-     * Applied only as the shortfall below this angle, so it fades out entirely when the
-     * kite genuinely stands up — which it now does low in the window, where the bridle
-     * geometry puts it at a high angle of attack. Nothing to do with the bridle; that is
-     * `bridleDeg`, and it is physical.
-     */
-    drawPitchFloorDeg: number
   }
   line: {
     length: number
@@ -125,6 +113,9 @@ export interface Config {
     maxTension: number
     /** Sag depth as a fraction of line length when fully slack. */
     sagFactor: number
+    /** The same, for the bridle legs, as a fraction of the spine. They are line and
+     *  not wire, so they go soft when the kite is unloaded. */
+    bridleSag: number
   }
   hand: {
     /** Seconds to reach full draw while a key is held. */
@@ -192,7 +183,6 @@ export const config: Config = {
     visualScale: 2.2,
     aspect: 1.5,
     tailLength: 3.5,
-    drawPitchFloorDeg: 40,
   },
   line: {
     length: 30,
@@ -205,6 +195,7 @@ export const config: Config = {
     tautTension: 14,
     maxTension: 1200,
     sagFactor: 0.16,
+    bridleSag: 0.13,
   },
   hand: {
     drawTime: 0.28,

@@ -64,7 +64,6 @@ const SECTIONS: Section[] = [
       { path: 'kite.visualScale', label: 'drawn size x', min: 1, max: 6, step: 0.1 },
       { path: 'kite.aspect', label: 'height / width', min: 0.8, max: 3, step: 0.05 },
       { path: 'kite.tailLength', label: 'tail length m', min: 0, max: 15, step: 0.25 },
-      { path: 'kite.drawPitchFloorDeg', label: 'min draw pitch deg', min: 0, max: 80, step: 1 },
     ],
   },
   {
@@ -78,6 +77,7 @@ const SECTIONS: Section[] = [
       { path: 'line.tautTension', label: 'taut tension N', min: 1, max: 100, step: 1 },
       { path: 'line.maxTension', label: 'max tension N', min: 100, max: 5000, step: 50 },
       { path: 'line.sagFactor', label: 'sag factor', min: 0, max: 0.5, step: 0.005 },
+      { path: 'line.bridleSag', label: 'bridle sag', min: 0, max: 0.5, step: 0.005 },
     ],
   },
   {

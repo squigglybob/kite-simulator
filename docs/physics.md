@@ -146,6 +146,54 @@ its own wind indicator.
 
 *Sliders: base speed m/s, shear exponent, gust amplitude, gust cell size m, turbulence amp.*
 
+## Dihedral — the missing stabiliser, and why other kite shapes will need it
+
+Worth writing down before we add more kite types, because it explains a whole class of
+behaviour.
+
+A **flat** diamond kite is roll-unstable. Nothing about a flat plate resists it tipping
+onto one side: once it starts rolling, the lift tips with it, the kite slides sideways,
+and it spirals in. We saw exactly this — roll growing steadily at 2, 5, 10, 18 degrees
+per second while pitch stayed perfectly behaved.
+
+Real kites solve it two ways.
+
+**A weighted tail** hangs below on a lever arm and acts as a pendulum. Gravity on that
+mass pulls the kite upright, and crucially it needs no airflow, so it is still working
+when the wind drops and every aerodynamic term has gone quiet. This is what the model
+uses today, and it is why `tailMassPerMetre` matters as much as it does.
+
+**Dihedral** — the bow in the cross spar that makes the kite a shallow V — is the other,
+and it is the better one. Roll one wing down and it presents more area to the airflow
+than the raised one, so it generates more lift and pushes itself back level. An Eddy
+kite is bowed for precisely this reason.
+
+The difference matters because of *how the two scale*. Tail weight is constant, so a
+tail heavy enough to hold roll in a stiff breeze is too heavy to fly in a light one, and
+it pitches the nose up and has to be trimmed out. That is the tradeoff currently baked
+into the model, and it is why the kite wants roughly 8 m/s or more. Dihedral scales with
+dynamic pressure like every other aerodynamic force, so it works across the whole wind
+range and adds no pitch bias at all — which would let the tail go back to being light.
+
+**Implementation sketch.** Split the aerodynamic force into two half-panels offset
+`±span/4` along the span, each with its own normal tilted by the dihedral angle, each
+computing its own incidence from the local relative wind — which includes the rotational
+term `spin x r`, and that is where the restoring moment comes from. Sum the forces and
+torques. Nothing else in the model has to change.
+
+### What this means for other kite shapes
+
+- **Deltas** get very large effective dihedral from their sail billowing into a deep V,
+  plus a keel. They are stable with no tail at all — which the model cannot currently
+  reproduce, because it has no dihedral term.
+- **Box and cellular kites** get stability from their geometry: the vertical panels act
+  as fins and give real yaw stiffness, something a flat plate has none of.
+- **Two-line stunt kites** are the interesting case. They use dihedral *and* a wide
+  span, but deliberately little tail, because a tail resists exactly the fast yaw the
+  player is trying to command. Steering them is a yaw torque from the differential line
+  pull, so a heavy stabilising tail would fight the controls. Dihedral has to be in
+  before stunt kites will feel right.
+
 ## Verification
 
 `npm run sanity` runs the whole model headlessly against six behavioural checks: steady

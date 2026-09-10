@@ -14,6 +14,8 @@ import { getSprite } from '../spritecache'
 
 /** How much of the band below the horizon is water rather than sand. */
 const SEA_BAND_FRACTION = 0.13
+/** Water plus surf — the whole strip the swell lifts, foam line included. */
+const WAVE_BAND_FRACTION = 0.16
 
 export interface GroundLayout {
   width: number
@@ -337,16 +339,12 @@ export function drawSwayingGrass(
   draw(duneRight, 'grassRight', true)
 }
 
-export function drawGround(
-  ctx: CanvasRenderingContext2D,
-  layout: GroundLayout,
-  scrollX: number,
-): void {
+function groundSprite(layout: GroundLayout, scrollX: number): HTMLCanvasElement {
   const hasArt = scenery.loaded
   const source = hasArt ? 'beach' : 'drawn'
   const key = `ground:${source}:${layout.width}:${layout.height}:${layout.horizonY}:${layout.shoreY}:${Math.round(scrollX)}`
 
-  const sprite = getSprite(key, layout.width, layout.height, (target) => {
+  return getSprite(key, layout.width, layout.height, (target) => {
     drawHeadlands(target, layout, scrollX)
     if (hasArt) {
       drawBeachBitmap(target, layout)
@@ -357,5 +355,95 @@ export function drawGround(
       drawBeach(target, layout, scrollX)
     }
   })
-  ctx.drawImage(sprite, 0, 0)
 }
+
+export function drawGround(
+  ctx: CanvasRenderingContext2D,
+  layout: GroundLayout,
+  scrollX: number,
+): void {
+  ctx.drawImage(groundSprite(layout, scrollX), 0, 0)
+}
+
+/**
+ * Swell rolling up the beach.
+ *
+ * The water is a painting, so there is nothing to simulate — instead the band of water
+ * and surf is lifted and set down again by a pixel or two. The colour bands inside it
+ * are flat, so what you see moving is the *boundaries* between them undulating, which
+ * is what makes pixel-art water read as water.
+ *
+ * Two things this gets right that a naive version does not.
+ *
+ * The crests travel **shoreward**, not along the beach. The phase advances with depth
+ * into the water rather than with distance along it, so a swell appears out by the
+ * horizon and works its way down to the sand. Driving the phase from `x` instead — the
+ * obvious thing to write — sends the whole sea sliding sideways past you, which is not
+ * something water does.
+ *
+ * And it is the sum of two wave trains at incommensurate wavelengths and speeds, with
+ * a slight slant across the shore so crests are not dead straight. A single sine is
+ * perfectly periodic in both space and time and the eye picks it out immediately as a
+ * moving graph rather than as sea.
+ *
+ * The displacement is only ever downward. Letting it go up would lift sea pixels over
+ * the horizon into the sky; pushing down reads as surf running up the sand, and any
+ * sliver uncovered at the top is the unshifted sea underneath, the same colour.
+ */
+export function drawWaves(
+  ctx: CanvasRenderingContext2D,
+  layout: GroundLayout,
+  scrollX: number,
+  time: number,
+  windSpeed: number,
+): void {
+  const s = config.scenery
+  const band = layout.height - layout.horizonY
+  const rows = Math.round(band * WAVE_BAND_FRACTION)
+  if (s.waveHeight < 1 || rows < 4) return
+
+  const ground = groundSprite(layout, scrollX)
+  const key = `seaband:${layout.width}:${layout.horizonY}:${rows}:${scenery.loaded ? 'art' : 'drawn'}`
+  const water = getSprite(key, layout.width, rows, (target) => {
+    target.drawImage(ground, 0, -layout.horizonY)
+  })
+
+  // Split into depth zones. The swell moves through these, from the horizon inward.
+  const zones = Math.min(5, rows)
+  const zoneRows = rows / zones
+  const speed = s.waveSpeed * (0.4 + Math.min(windSpeed / 10, 1.4))
+  // Shoreward wavelength, expressed as how much phase is crossed over the whole band.
+  const perZone = (Math.PI * 2 * rows) / Math.max(8, s.waveLength) / zones
+  const slantA = (Math.PI * 2) / Math.max(60, s.waveLength * 3.1)
+  const slantB = (Math.PI * 2) / Math.max(60, s.waveLength * 1.7)
+  const slice = 16
+
+  for (let zone = 0; zone < zones; zone++) {
+    const top = Math.floor(zone * zoneRows)
+    const height = Math.max(1, Math.floor((zone + 1) * zoneRows) - top)
+    const depth = zone * perZone
+
+    for (let x = 0; x < layout.width; x += slice) {
+      const width = Math.min(slice, layout.width - x)
+      // Two trains, deliberately not harmonics of each other, each slanting slightly
+      // differently across the shore.
+      const a = Math.sin(depth - time * speed + x * slantA)
+      const b = Math.sin(depth * 0.63 - time * speed * 1.47 + x * slantB + 2.2)
+      const lift = (a * 0.62 + b * 0.38) * 0.5 + 0.5
+      const dy = Math.round(lift * s.waveHeight)
+      if (dy === 0) continue
+      ctx.drawImage(
+        water,
+        x,
+        top,
+        width,
+        height,
+        x,
+        layout.horizonY + top + dy,
+        width,
+        height,
+      )
+    }
+  }
+}
+

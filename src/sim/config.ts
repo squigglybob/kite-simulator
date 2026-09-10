@@ -141,6 +141,12 @@ export interface Config {
     grassSway: number
     /** Flutter rate in radians per second. */
     grassRate: number
+    /** How far the swell lifts the water band, in pixels. */
+    waveHeight: number
+    /** Distance between wave crests along the shore, in pixels. */
+    waveLength: number
+    /** How fast crests travel, scaled by the live wind. */
+    waveSpeed: number
   }
   audio: {
     /** Ambient bed level, 0 to 1. */
@@ -220,6 +226,9 @@ export const config: Config = {
     seaSparkleRate: 9,
     grassSway: 9,
     grassRate: 2.4,
+    waveHeight: 2,
+    waveLength: 90,
+    waveSpeed: 1.1,
   },
   audio: {
     volume: 0.55,

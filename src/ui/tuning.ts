@@ -96,6 +96,9 @@ const SECTIONS: Section[] = [
       { path: 'scenery.seaSparkleRate', label: 'sparkle rate', min: 1, max: 30, step: 0.5 },
       { path: 'scenery.grassSway', label: 'grass sway px', min: 0, max: 30, step: 0.5 },
       { path: 'scenery.grassRate', label: 'grass flutter', min: 0.2, max: 8, step: 0.1 },
+      { path: 'scenery.waveHeight', label: 'swell height px', min: 0, max: 8, step: 1 },
+      { path: 'scenery.waveLength', label: 'swell length px', min: 16, max: 300, step: 2 },
+      { path: 'scenery.waveSpeed', label: 'swell speed', min: 0, max: 6, step: 0.1 },
     ],
   },
   {

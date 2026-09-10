@@ -161,14 +161,21 @@ export function loadSavedConfig(): void {
 
 export interface TuningPanel {
   toggle(): void
+  /** Greys the launch button out while the kite is flying. */
+  setLaunchEnabled(enabled: boolean): void
   /** Push config values back into the sliders after a programmatic change. */
   refresh(): void
 }
 
-export function createTuningPanel(
-  onReset: () => void,
-  onChange?: (path: string) => void,
-): TuningPanel {
+export interface TuningHooks {
+  /** Start over: kite in the air, clock and score cleared. */
+  onRelaunch: () => void
+  /** Walk the kite out and set it down ready to fly, keeping the score. */
+  onSetUpForLaunch: () => void
+  onChange?: (path: string) => void
+}
+
+export function createTuningPanel(hooks: TuningHooks): TuningPanel {
   // A hot reload re-runs this module without unloading the page, which would otherwise
   // leave the previous panel behind and stack a second one beside it.
   document.querySelectorAll('.tuning').forEach((stale) => stale.remove())
@@ -198,7 +205,8 @@ export function createTuningPanel(
         background: #1b222c; color: #d7e3ec;
         font: inherit; border-radius: 3px;
       }
-      .tuning button:hover { background: #26303d; }
+      .tuning button:hover:not(:disabled) { background: #26303d; }
+      .tuning button:disabled { opacity: 0.35; cursor: default; }
       .tuning .hint { color: #6b7a8a; margin-top: 10px; }
     </style>
   `
@@ -243,7 +251,7 @@ export function createTuningPanel(
         const n = Number(slider.value)
         writePath(config as unknown as Nested, spec.path, n)
         show(n)
-        onChange?.(spec.path)
+        hooks.onChange?.(spec.path)
         save()
       })
       // Otherwise the focused slider swallows the arrow keys used to fly.
@@ -276,17 +284,29 @@ export function createTuningPanel(
   const relaunchButton = document.createElement('button')
   relaunchButton.textContent = 'Relaunch'
   relaunchButton.addEventListener('click', () => {
-    onReset()
+    hooks.onRelaunch()
     relaunchButton.blur()
   })
 
   actions.append(copyButton, resetButton, relaunchButton)
   root.append(actions)
 
+  // Its own row, because it is the one you reach for repeatedly while flying.
+  const launchRow = document.createElement('div')
+  launchRow.className = 'actions'
+  const launchButton = document.createElement('button')
+  launchButton.textContent = 'Set up for launch  (Space)'
+  launchButton.addEventListener('click', () => {
+    hooks.onSetUpForLaunch()
+    launchButton.blur()
+  })
+  launchRow.append(launchButton)
+  root.append(launchRow)
+
   const hint = document.createElement('p')
   hint.className = 'hint'
   hint.textContent =
-    'A / L hands. Q / E line. R relaunch. W wind window. H readout. V vectors. M mute. T panel.'
+    'A / L hands. Q / E line. Space set up launch. R relaunch. W window. H readout. V vectors. M mute. T panel.'
   root.append(hint)
 
   document.body.append(root)
@@ -299,9 +319,16 @@ export function createTuningPanel(
     }, 250)
   }
 
+  let launchEnabled = true
+
   return {
     toggle() {
       root.hidden = !root.hidden
+    },
+    setLaunchEnabled(enabled) {
+      if (enabled === launchEnabled) return
+      launchEnabled = enabled
+      launchButton.disabled = !enabled
     },
     refresh() {
       for (const sync of refreshers) sync()

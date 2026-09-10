@@ -50,15 +50,26 @@ void ambience.load()
 ambience.unlockOn()
 const kiteRenderer = new KiteRenderer()
 
-const panel = createTuningPanel(
-  () => {
+/**
+ * Only available with the kite down. Setting up mid-flight would snatch a good flight
+ * away on a stray keypress, and there is no real-world action it corresponds to.
+ */
+function setUpForLaunch(): void {
+  if (!world.isGrounded) return
+  world.setUpForLaunch()
+  kiteRenderer.reset()
+}
+
+const panel = createTuningPanel({
+  onRelaunch: () => {
     world.reset()
     kiteRenderer.reset()
   },
-  (path) => {
+  onSetUpForLaunch: setUpForLaunch,
+  onChange: (path) => {
     if (path.startsWith('audio.')) ambience.refreshVolume()
   },
-)
+})
 let showVectors = false
 let showDebug = true
 let showWindow = false
@@ -76,6 +87,7 @@ input.onPress('KeyT', () => panel.toggle())
 input.onPress('KeyM', () => ambience.toggleMute())
 input.onPress('KeyH', () => (showDebug = !showDebug))
 input.onPress('KeyW', () => (showWindow = !showWindow))
+input.onPress('Space', setUpForLaunch)
 
 /** World-space distance to the waterline. Fixes where sea meets sand on screen. */
 const SHORE_DISTANCE = 45
@@ -238,6 +250,7 @@ function render(alpha: number, frameTime: number): void {
     best = world.stats.maxAltitude
     localStorage.setItem(BEST_KEY, String(Math.round(best)))
   }
+  panel.setLaunchEnabled(world.isGrounded)
   drawHud(ctx, world, {
     fps: Math.round(1 / smoothedFrameTime),
     zoom: camera.zoom,

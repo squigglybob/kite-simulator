@@ -48,7 +48,13 @@ export function createInput(target: EventTarget = window): Input {
       state[bound] = true
       e.preventDefault()
     }
-    for (const handler of pressHandlers.get(e.code) ?? []) handler()
+
+    const handlers = pressHandlers.get(e.code)
+    if (handlers?.length) {
+      // Otherwise Space scrolls the page out from under the game.
+      e.preventDefault()
+      for (const handler of handlers) handler()
+    }
   })
 
   target.addEventListener('keyup', (event) => {

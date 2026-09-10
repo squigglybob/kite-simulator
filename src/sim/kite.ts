@@ -45,6 +45,8 @@ import {
 const DEG = Math.PI / 180
 const WORLD_UP: Vec3 = { x: 0, y: 1, z: 0 }
 const GROUND_Y = 0.15
+/** How far the kite is propped back when set down ready to launch. */
+const LAUNCH_TILT = 38 * DEG
 /** Backstops. Nothing physical should approach either. */
 const MAX_SPEED = 90
 const MAX_SPIN = 40
@@ -140,6 +142,42 @@ export class Kite {
     const lift = normalize(cross(flow, this.span))
     this.normal = normalize(
       add(scale(lift, Math.cos(trim)), scale(flow, Math.sin(trim))),
+    )
+    this.nose = cross(this.normal, this.span)
+    this.orthonormalise()
+  }
+
+  /**
+   * Lays the kite out ready to be launched: walked downwind to the end of the line,
+   * set on the sand, and propped with its nose up and its face tilted back into the
+   * wind. This is how you actually start a kite, and unlike a relaunch it leaves the
+   * clock and the score alone.
+   *
+   * The prop angle is well past the stall on purpose. A kite lying flat catches
+   * nothing; standing it up gives the wind a face to push on, which is what gets it
+   * off the ground.
+   */
+  placeForLaunch(handPos: Vec3): void {
+    const reach = config.line.length * 0.98
+    const air = windAt(v3(handPos.x, 2, handPos.z + 5), 0)
+    let downwind = v3(air.x, 0, air.z)
+    downwind = length(downwind) > 1e-3 ? normalize(downwind) : v3(0, 0, 1)
+
+    this.pos = v3(
+      handPos.x + downwind.x * reach,
+      GROUND_Y + 0.01,
+      handPos.z + downwind.z * reach,
+    )
+    this.prevPos = copy(this.pos)
+    this.vel = v3()
+    this.spin = v3()
+    this.crashed = false
+
+    const flow = normalize(windAt(this.pos, 0))
+    this.span = normalize(cross(WORLD_UP, flow))
+    const lift = normalize(cross(flow, this.span))
+    this.normal = normalize(
+      add(scale(lift, Math.cos(LAUNCH_TILT)), scale(flow, Math.sin(LAUNCH_TILT))),
     )
     this.nose = cross(this.normal, this.span)
     this.orthonormalise()

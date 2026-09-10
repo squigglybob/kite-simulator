@@ -372,3 +372,19 @@ camera ever pitches to follow the kite, it can be deleted.
 
 Sweeping `bridleDeg` against `cd0` and `dragPerMetre` headlessly is how these were chosen; the
 sweep is trivial to rebuild from `scripts/sanity.ts` if they need revisiting.
+
+## To fix
+- body lean when the tension is high
+- can we generate a better body.
+- I'd like the beach to be fixed width, and mirror the dunes to get another section of beach, when the camera zooms out and the beach increases width it looks wierd
+
+## Todo list
+1. Minimum beach width. On a narrow screen the two dunes pin to the screen edges at a constant size, so they can crowd out the sand corridor entirely and leave you flying over nothing but grass. Needs a floor on the sand width, with the dunes shrinking or sliding partly off-screen once that floor is hit — so you always get a bit of dune each side and a usable beach between.
+
+2. Touch support — both hands and line length, plus pause/settings. Currently A/L are spring-loaded keys with no touch equivalent at all, so a phone can load the game but can't play it. Worth remembering the hands need analogue depth, not just tap-on/tap-off: a stab is a sharp tug and a hold is a sustained pull, and touch needs to preserve that distinction. Pause and settings matter more on touch too, since there's no T key to reach for.
+
+3. Camera follow on narrower screens. Right now the camera direction is fixed and the zoom pulls out to fit the kite while the flyer stays pinned to the bottom. On a narrow screen that forces a very wide zoom-out and the kite becomes tiny. Following the kite instead would keep it readable.
+
+Worth flagging on that last one: it interacts with the azimuth issue already in the plan. The camera sits behind the flyer specifically so a kite at 90° azimuth still has depth in camera space and projects somewhere finite. If the camera starts following the kite, that geometry changes and the reasoning needs revisiting — particularly before two-line kites, which sweep the full width of the wind window.
+
+4. A reset kite into launch position, so a good tug will launch it. both in rotation, and also with the kite at a distance that puts the kite with the line taught.

@@ -36,6 +36,26 @@ export class World {
     this.kite.reset(this.flyer.handPos)
   }
 
+  /**
+   * Low enough to be considered down. Deliberately a height test rather than the
+   * crash flag, which latches and would still read false for the frame or two after
+   * the kite is set down but before gravity has settled it.
+   */
+  get isGrounded(): boolean {
+    return this.kite.pos.y <= 1.2
+  }
+
+  /**
+   * Sets the kite down at the end of the line ready to fly, without touching the
+   * clock, the best height or the crash count — this is picking the kite up and
+   * walking it out, not starting again.
+   */
+  setUpForLaunch(): void {
+    this.kite.placeForLaunch(this.flyer.handPos)
+    // It is sitting on the sand by design, so the next ground contact is not a crash.
+    this.wasCrashed = true
+  }
+
   step(dt: number, input: InputState): void {
     this.time += dt
 

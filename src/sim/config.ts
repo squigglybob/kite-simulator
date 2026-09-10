@@ -131,6 +131,13 @@ export interface Config {
     /** Grip height in metres. Should read as waist height on a 1.75 m figure. */
     height: number
   }
+  scenery: {
+    /** How much light the water throws back. Scaled by the live wind, so the sea
+     *  picks up when it starts blowing. */
+    seaSparkle: number
+    /** Flicker rate in steps per second. */
+    seaSparkleRate: number
+  }
   audio: {
     /** Ambient bed level, 0 to 1. */
     volume: number
@@ -203,6 +210,10 @@ export const config: Config = {
     drawDepth: 0.55,
     lateralOffset: 0.6,
     height: 1.0,
+  },
+  scenery: {
+    seaSparkle: 0.05,
+    seaSparkleRate: 9,
   },
   audio: {
     volume: 0.55,

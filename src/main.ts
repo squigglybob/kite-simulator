@@ -9,10 +9,11 @@ import { BASE_H, BASE_W, Screen } from './render/screen'
 import { loadScenery } from './render/assets'
 import { CloudField } from './render/sprites/cloud'
 import { drawFlyer } from './render/sprites/flyer'
-import { drawGround, type GroundLayout } from './render/sprites/ground'
+import { drawGround, drawSeaSparkle, type GroundLayout } from './render/sprites/ground'
 import { KiteRenderer } from './render/sprites/kite'
 import { drawSky } from './render/sprites/sky'
 import { config } from './sim/config'
+import { windAt } from './sim/wind'
 import { sagDepth } from './sim/line'
 import { World } from './sim/world'
 import { drawHud } from './ui/hud'
@@ -148,6 +149,10 @@ function render(alpha: number, frameTime: number): void {
   drawSky(ctx, BASE_W, layout.horizonY)
   clouds.draw(ctx, camera, layout.horizonY)
   drawGround(ctx, layout, 0)
+  // Sampled just above the water so the glitter answers to the same field the kite
+  // is flying in, gusts and all.
+  const seaWind = windAt(v3(0, 1.5, SHORE_DISTANCE), world.time)
+  drawSeaSparkle(ctx, layout, world.time, Math.hypot(seaWind.x, seaWind.y, seaWind.z))
 
   // The flyer stands at the world origin, so their depth is the camera setback.
   const pixelsPerMetre = (config.camera.focal / config.camera.dist) * camera.zoom

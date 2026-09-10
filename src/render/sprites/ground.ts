@@ -1,4 +1,5 @@
 import { fbm1D, hash1 } from '../../core/rng'
+import { config } from '../../sim/config'
 import { SCENE_HEIGHT, scaled, scenery } from '../assets'
 import { C } from '../palette'
 import { getSprite } from '../spritecache'
@@ -10,6 +11,9 @@ import { getSprite } from '../spritecache'
  * because a noise-driven horizon tiles infinitely and lands in exactly the palette
  * colours. Each layer takes its own parallax factor so they separate with distance.
  */
+
+/** How much of the band below the horizon is water rather than sand. */
+const SEA_BAND_FRACTION = 0.13
 
 export interface GroundLayout {
   width: number
@@ -200,6 +204,56 @@ function drawBeachBitmap(ctx: CanvasRenderingContext2D, layout: GroundLayout): v
  * moves the horizon, so it is rasterised once per layout and blitted thereafter.
  * Redrawing it per frame cost roughly two thirds of the frame budget.
  */
+/**
+ * Sunlight glittering off the water.
+ *
+ * Drawn per frame rather than baked into the cached coastline, because it is the one
+ * part that has to move. It stays cheap by only touching the water band — about a
+ * dozen rows — and by deciding each pixel from a hash rather than tracking any state.
+ *
+ * Two details make it read as water rather than as noise. Each pixel advances through
+ * its own time steps from its own phase offset, so the field shimmers instead of
+ * strobing in unison. And density falls off toward the viewer: the sea near the horizon
+ * is seen at a glancing angle and catches far more light than the water at your feet.
+ *
+ * `windSpeed` is sampled from the live wind field, so the sea genuinely picks up when
+ * it starts blowing.
+ */
+export function drawSeaSparkle(
+  ctx: CanvasRenderingContext2D,
+  layout: GroundLayout,
+  time: number,
+  windSpeed: number,
+): void {
+  const band = layout.height - layout.horizonY
+  const rows = Math.round(band * SEA_BAND_FRACTION)
+  if (rows < 2) return
+
+  const s = config.scenery
+  const chop = Math.min(windSpeed / 10, 1.6)
+  const density = s.seaSparkle * (0.35 + chop)
+  if (density <= 0) return
+
+  const top = layout.horizonY + 1
+  const bottom = Math.min(top + rows, layout.height)
+
+  for (let y = top; y < bottom; y++) {
+    // Glancing light near the horizon, much less of it close in.
+    const nearness = (y - top) / Math.max(1, rows - 1)
+    const rowDensity = density * (1 - nearness * 0.75)
+
+    for (let x = 0; x < layout.width; x++) {
+      const phase = hash1(x + y * 7919, 311)
+      const step = Math.floor(time * s.seaSparkleRate + phase * 5)
+      if (hash1(x + y * 7919 + step * 104729, 17) >= rowDensity) continue
+
+      const bright = hash1(x + y * 31 + step, 53)
+      ctx.fillStyle = bright > 0.55 ? C.cloud : C.seaGlint
+      ctx.fillRect(x, y, bright > 0.9 ? 2 : 1, 1)
+    }
+  }
+}
+
 export function drawGround(
   ctx: CanvasRenderingContext2D,
   layout: GroundLayout,

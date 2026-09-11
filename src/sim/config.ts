@@ -13,7 +13,7 @@
 export type MusicSource = 'off' | 'generated' | 'tracks'
 
 /** The kites you can put on the line. */
-export type KiteType = 'diamond' | 'delta'
+export type KiteType = 'diamond' | 'delta' | 'stunt'
 
 /**
  * One kite's numbers. Every kite carries its own full set, so tuning the delta cannot
@@ -111,6 +111,53 @@ export interface KiteParams {
   keelApex: number
   keelDrop: number
   keelTow: number
+  /**
+   * Two lines instead of one. The kite then carries a bridle a side, each meeting at
+   * its own tow point out toward that wing, and the difference in pull between the
+   * two is what turns it.
+   */
+  dualLine: boolean
+  /**
+   * The dual-line bridle. `bridleAftAlong` is the spine station of the shared spine
+   * anchor and of the wing anchor level with it; `bridleForeAlong` is the station of
+   * the forward wing anchor. Both wing anchors ride on the leading edge, so how far
+   * out they sit follows from these.
+   *
+   * `towAlong`, `towSpread` and `towStandoff` place each tow point: down the spine,
+   * out toward its wingtip as a fraction of the half span, and off the windward face.
+   *
+   * The spread is what gives the kite a steering moment at all, and the standoff is
+   * what decides whether that moment comes out as *yaw* — the kite rotating in the
+   * plane of its own sail, which is what a stunt kite does — or merely as roll. A
+   * line pulling square to the sail at an offset point can only ever roll it.
+   */
+  bridleAftAlong: number
+  bridleForeAlong: number
+  towAlong: number
+  towSpread: number
+  towStandoff: number
+  /**
+   * Which tow point each hand's line runs to: false is left hand to left tow point.
+   *
+   * This is a control-layer correction, and it is worth being honest about what it
+   * compensates for rather than burying it. Whether a tug turns the kite toward that
+   * hand or away from it is decided by one thing: whether the flyer lies on the nose
+   * side or the tail side of the kite *within the plane of the sail*. The crossover
+   * is exactly where angle of attack plus elevation reaches ninety degrees.
+   *
+   * A real sport kite sits with its face to you and its nose up the window, putting
+   * you on the tail side, and a left tug then turns it left. This kite trims with its
+   * nose toward you, so the same geometry turns it right. Pushing the trim past the
+   * crossover does flip the couple — measured at minus 0.36 — but it needs better
+   * than thirty degrees of incidence, and by then the flat-plate stall has collapsed
+   * the lift and the kite mushes instead of flying where it points. Correct sense,
+   * no flight; or flight with the wrong sense.
+   *
+   * Until the swept planform carries lift to that incidence the way a real sport kite
+   * does, this routes the lines so the control reads correctly to the player. Setting
+   * it false shows the underlying behaviour unaltered.
+   */
+  steerInvert: boolean
   /** Angle of attack at which lift collapses, degrees. */
   stallDeg: number
   /** Degrees over which the stall blends in. */
@@ -201,6 +248,18 @@ export interface Config {
     drawDepth: number
     /** Metres of lateral hand separation at full differential. */
     lateralOffset: number
+    /** How far apart the two hands are held on a dual-line kite, metres. This is the
+     *  lever the steering works through, so it is a real control and not cosmetic. */
+    separation: number
+    /**
+     * How far a hand travels on a dual-line kite, metres. Much shorter than
+     * `drawDepth`, and it has to be: the tow points are only a half metre apart, so
+     * the kite has to rotate a long way to take up any slack difference between the
+     * two lines. Ask for more than it can rotate to and the line simply loads up
+     * instead — half a metre of draw put 495 N through one line of a kite that weighs
+     * two and a half, and it was hauled out of the sky rather than steered.
+     */
+    steerDepth: number
     /** Grip height in metres. Should read as waist height on a 1.75 m figure. */
     height: number
   }
@@ -295,6 +354,13 @@ export const config: Config = {
       keelApex: 0,
       keelDrop: 0,
       keelTow: 0.3,
+      dualLine: false,
+      bridleAftAlong: -0.383,
+      bridleForeAlong: 0.167,
+      towAlong: -0.1,
+      towSpread: 0.4,
+      towStandoff: 0.35,
+      steerInvert: false,
     },
     delta: {
       mass: 0.3,
@@ -321,6 +387,13 @@ export const config: Config = {
       keelApex: 0.1,
       keelDrop: 0.38,
       keelTow: 0.2,
+      dualLine: false,
+      bridleAftAlong: -0.383,
+      bridleForeAlong: 0.167,
+      towAlong: -0.1,
+      towSpread: 0.4,
+      towStandoff: 0.35,
+      steerInvert: false,
       stallDeg: 18,
       stallBlendDeg: 9,
       clScale: 1,
@@ -329,6 +402,47 @@ export const config: Config = {
       visualScale: 2.2,
       aspect: 0.75,
       tailLength: 1.5,
+    },
+    stunt: {
+      mass: 0.28,
+      area: 0.8,
+      bridleUpper: 0.467,
+      // Well forward of the diamond's, which puts the tow point *above* the centre of
+      // mass rather than below it. That is what a kite with little tail needs: hung
+      // from a point below its centre it wants to flip nose-down, and only a heavy
+      // tail holds it up. Swept headlessly — at the diamond's 0.413 this kite does not
+      // survive a single wind speed, and from about 0.62 it flies at all of them.
+      bridleLower: 0.64,
+      cpBase: -0.16,
+      cpSlope: -0.3,
+      tailDrag: 0.002,
+      tailArm: 1.2,
+      tailMassPerMetre: 0.04,
+      aeroDamping: 0.22,
+      spinDamping: 0.02,
+      sideslipLift: 0.9,
+      sideslipDrag: 0.7,
+      dihedralDeg: 10,
+      keelFore: 0.3,
+      keelAft: -0.3,
+      keelApex: 0.1,
+      keelDrop: 0.16,
+      keelTow: 0.2,
+      dualLine: true,
+      bridleAftAlong: -0.383,
+      bridleForeAlong: 0.167,
+      towAlong: 0,
+      towSpread: 0.4,
+      towStandoff: 0.18,
+      steerInvert: true,
+      stallDeg: 18,
+      stallBlendDeg: 9,
+      clScale: 1,
+      cdScale: 1,
+      cd0: 0.08,
+      visualScale: 2.2,
+      aspect: 0.6,
+      tailLength: 0,
     },
   },
   // Replaced immediately below by `selectKite`, which points it at `kites.diamond`.
@@ -352,6 +466,8 @@ export const config: Config = {
     releaseTime: 0.4,
     drawDepth: 0.55,
     lateralOffset: 0.6,
+    separation: 0.5,
+    steerDepth: 0.1,
     height: 1.0,
   },
   scenery: {
@@ -390,8 +506,12 @@ export const cloneConfig = (): Config => structuredClone(config)
  * writes into the preset it belongs to.
  */
 export function selectKite(type: KiteType): void {
-  config.kiteType = type
-  config.kite = config.kites[type]
+  // A saved config from an older build can name a kite that no longer exists. Leaving
+  // `config.kite` undefined throws on the very next physics step and blacks the game
+  // out, which is a miserable way to find out your localStorage is stale.
+  const known = config.kites[type] ? type : 'diamond'
+  config.kiteType = known
+  config.kite = config.kites[known]
 }
 
 selectKite(config.kiteType)

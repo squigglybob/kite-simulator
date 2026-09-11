@@ -222,8 +222,7 @@ function groundLayout(): GroundLayout {
  * left to droop into, so the line snapped straight exactly when it should have looked
  * its slackest.
  */
-function drawString(handScreen: Point, tow: Vec3): void {
-  const handWorld = world.flyer.handPos
+function drawString(handScreen: Point, tow: Vec3, handWorld: Vec3 = world.flyer.handPos): void {
   const sag = sagDepth(world.kite.diag.line)
 
   // Both controls hang this far under the chord. A cubic whose controls are dropped by
@@ -295,7 +294,15 @@ function render(alpha: number, frameTime: number): void {
   const heightPx = Math.max(6, FLYER_HEIGHT_M * pixelsPerMetre * (1 - 0.08 * tensionFraction))
 
   // The line ends at the bridle's tow point, which stands off the front of the kite.
-  const towWorld = kiteRenderer.bridlePoint(kite, kiteWorld)
+  // A two-line kite has one either side; the rig and the HUD still track the middle.
+  const pair = kiteRenderer.towPoints(kite, kiteWorld)
+  const towWorld = pair
+    ? v3(
+        (pair.left.x + pair.right.x) / 2,
+        (pair.left.y + pair.right.y) / 2,
+        (pair.left.z + pair.right.z) / 2,
+      )
+    : kiteRenderer.bridlePoint(kite, kiteWorld)
   const towScreen = camera.project(towWorld)
   // One grip, shared by the rig and the string: the projected simulated hand position.
   // Drawing them from separate points left a kink at the hands.
@@ -317,7 +324,23 @@ function render(alpha: number, frameTime: number): void {
   // nearer the camera than the kite is, so a line drawn underneath the body looked as
   // though it passed behind the kite.
   kiteRenderer.draw(ctx, camera, kite, kiteWorld)
-  drawString(handScreen, towWorld)
+  if (pair) {
+    // Two lines, each from its own hand to its own tow point. They cross on screen
+    // whenever the kite is turned away from the flyer, which is exactly what two
+    // real lines do.
+    // Whichever way the lines are routed, draw them the way they are actually rigged
+    // — a crossed pair should look crossed rather than quietly lying about it.
+    const toLeftTow = config.kite.steerInvert
+      ? world.flyer.rightHand
+      : world.flyer.leftHand
+    const toRightTow = config.kite.steerInvert
+      ? world.flyer.leftHand
+      : world.flyer.rightHand
+    drawString(camera.project(toLeftTow), pair.left, toLeftTow)
+    drawString(camera.project(toRightTow), pair.right, toRightTow)
+  } else {
+    drawString(handScreen, towWorld)
+  }
   kiteRenderer.drawBridle(ctx, camera, kite, kiteWorld)
 
   if (showWindow) drawWindWindow(ctx, camera, world)

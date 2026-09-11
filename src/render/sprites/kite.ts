@@ -1,5 +1,5 @@
 import { config } from '../../sim/config'
-import { bridleGeometry } from '../../sim/bridle'
+import { bridleGeometry, dualBridle, isDualLine } from '../../sim/bridle'
 import { hasKeel, keelGeometry } from '../../sim/keel'
 import { LOWER_BRIDLE, NOSE, SPAR, TAIL } from '../../sim/shape'
 import type { Kite } from '../../sim/kite'
@@ -158,6 +158,59 @@ export class KiteRenderer {
     )
   }
 
+  /**
+   * A dual-line kite's two tow points, where its two flying lines begin. Null for a
+   * single-liner, which has one and gets it from `bridlePoint`.
+   */
+  towPoints(kite: Kite, centre: Vec3): { left: Vec3; right: Vec3 } | null {
+    if (!isDualLine()) return null
+    const size = dimensions()
+    const frame = kiteFrame(kite, viewTo(centre))
+    const at = (side: number): Vec3 => {
+      const b = dualBridle(side)
+      return add(
+        add(
+          add(centre, scale(frame.nose, b.along * size.spine)),
+          scale(frame.span, b.across * size.span * 0.5),
+        ),
+        // Standing off the windward face, which is the side away from the normal.
+        scale(frame.normal, -b.standoff * size.spine),
+      )
+    }
+    return { left: at(-1), right: at(1) }
+  }
+
+  /**
+   * The dual-line bridle: three legs a side, running from the shared spine anchor and
+   * from two points on each leading edge out to that side's tow point. Drawn straight
+   * rather than with sag — under two loaded lines they are never slack.
+   */
+  private drawDualBridle(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    kite: Kite,
+    centre: Vec3,
+  ): void {
+    const size = dimensions()
+    const frame = kiteFrame(kite, viewTo(centre))
+    const tow = this.towPoints(kite, centre)
+    if (!tow) return
+    const spanPx = Math.hypot(
+      camera.project(tow.left).x - camera.project(tow.right).x,
+      camera.project(tow.left).y - camera.project(tow.right).y,
+    )
+    if (spanPx < 6) return
+
+    for (const side of [-1, 1]) {
+      const b = dualBridle(side)
+      const end = camera.project(side < 0 ? tow.left : tow.right)
+      for (const a of b.anchors) {
+        const p = camera.project(sailPoint(centre, frame, size, a.along, a.across))
+        pixelLine(ctx, p.x, p.y, end.x, end.y, C.ink)
+      }
+    }
+  }
+
   update(kite: Kite, dt: number): void {
     const anchor = this.anchor(kite)
     const link = (config.kite.tailLength * config.kite.visualScale) / (TAIL_LINKS - 1)
@@ -215,12 +268,18 @@ export class KiteRenderer {
     const pRight = at(SPAR, 1)
     const spanPx = Math.hypot(pRight.x - pLeft.x, pRight.y - pLeft.y)
 
-    if (config.kiteType === 'delta') {
-      // A delta is a swept triangle: the nose leads, the wingtips trail well behind
-      // it, and the trailing edge is cut away between them.
+    if (config.kiteType !== 'diamond') {
+      // Swept planform: the nose leads, the wingtips trail well behind it, and the
+      // trailing edge is cut away between them so it runs forward from each tip to
+      // the foot of the spine.
+      //
+      // A sport kite is cut back much harder than a single-line delta — the sail is
+      // little more than two swept leading edges and a deep notch — which is most of
+      // why the two do not look alike even at the same span.
+      const notchDepth = config.kiteType === 'stunt' ? 0.5 : 0.28
       const tipL = at(TAIL, -1)
       const tipR = at(TAIL, 1)
-      const notch = at(TAIL + 0.28, 0)
+      const notch = at(TAIL + notchDepth, 0)
       const tipSpan = Math.hypot(tipR.x - tipL.x, tipR.y - tipL.y)
 
       this.drawTail(ctx, camera, notch, tipSpan)
@@ -232,6 +291,13 @@ export class KiteRenderer {
 
       if (tipSpan > 7) pixelLine(ctx, pNose.x, pNose.y, notch.x, notch.y, C.ink)
       if (tipSpan > 12) pixelPath(ctx, [pNose, tipL, notch, tipR, pNose], C.ink)
+      // The spreader, bracing the two leading edges apart. On a sport kite it is the
+      // most visible spar there is, and it reads even at a few pixels.
+      if (config.kiteType === 'stunt' && tipSpan > 14) {
+        const sL = at(SPAR - 0.1, -0.55)
+        const sR = at(SPAR - 0.1, 0.55)
+        pixelLine(ctx, sL.x, sL.y, sR.x, sR.y, C.ink)
+      }
       return
     }
 
@@ -299,6 +365,12 @@ export class KiteRenderer {
     kite: Kite,
     centre: Vec3,
   ): void {
+    // Two lines means two bridles, one a side, drawn by their own routine.
+    if (isDualLine()) {
+      this.drawDualBridle(ctx, camera, kite, centre)
+      return
+    }
+
     // A keeled kite has no bridle to draw: the flying line ties straight onto the
     // keel, and `bridlePoint` already ends it there. A delta has no left and right
     // leg at all — that single keel attachment is the whole of its bridle.

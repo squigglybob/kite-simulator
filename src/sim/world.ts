@@ -73,7 +73,15 @@ export class World {
     }
 
     this.flyer.step(dt, input, this.kite.diag.line.dir)
-    this.kite.step(dt, this.flyer.handPos, this.time)
+    this.kite.step(
+      dt,
+      {
+        centre: this.flyer.handPos,
+        left: this.flyer.leftHand,
+        right: this.flyer.rightHand,
+      },
+      this.time,
+    )
 
     const ground = windAt(v3(0, 2, 6), this.time)
     this.windAtGround = Math.hypot(ground.x, ground.y, ground.z)

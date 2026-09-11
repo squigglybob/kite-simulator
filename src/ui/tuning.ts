@@ -77,6 +77,7 @@ const SECTIONS: Section[] = [
         options: [
           { value: 'diamond', label: 'diamond (tailed)' },
           { value: 'delta', label: 'delta (dihedral)' },
+          { value: 'stunt', label: 'stunt delta (2 line)' },
         ],
       },
       { path: 'kite.mass', label: 'mass kg', min: 0.05, max: 2, step: 0.01 },
@@ -91,6 +92,12 @@ const SECTIONS: Section[] = [
       { path: 'kite.aeroDamping', label: 'plate damping', min: 0, max: 2, step: 0.01 },
       { path: 'kite.spinDamping', label: 'spin damping', min: 0, max: 0.5, step: 0.005 },
       { path: 'kite.dihedralDeg', label: 'dihedral deg', min: 0, max: 40, step: 0.5 },
+      { path: 'kite.steerInvert', label: '2-line cross lines' },
+      { path: 'kite.towAlong', label: '2-line tow along', min: -0.4, max: 0.4, step: 0.01 },
+      { path: 'kite.towSpread', label: '2-line tow spread', min: 0.1, max: 1, step: 0.02 },
+      { path: 'kite.towStandoff', label: '2-line tow standoff', min: 0.02, max: 0.6, step: 0.01 },
+      { path: 'kite.bridleAftAlong', label: '2-line bridle aft', min: -0.55, max: 0.1, step: 0.01 },
+      { path: 'kite.bridleForeAlong', label: '2-line bridle fore', min: -0.1, max: 0.4, step: 0.01 },
       { path: 'kite.keelFore', label: 'keel fore', min: -0.2, max: 0.45, step: 0.01 },
       { path: 'kite.keelAft', label: 'keel aft', min: -0.6, max: 0.2, step: 0.01 },
       { path: 'kite.keelApex', label: 'keel apex', min: -0.4, max: 0.45, step: 0.01 },
@@ -128,6 +135,8 @@ const SECTIONS: Section[] = [
       { path: 'hand.drawTime', label: 'draw time s', min: 0.05, max: 1.5, step: 0.01 },
       { path: 'hand.releaseTime', label: 'release time s', min: 0.05, max: 2, step: 0.01 },
       { path: 'hand.drawDepth', label: 'draw depth m', min: 0, max: 3, step: 0.05 },
+      { path: 'hand.separation', label: 'hand separation m', min: 0.1, max: 1.2, step: 0.02 },
+      { path: 'hand.steerDepth', label: 'steer travel m', min: 0.01, max: 0.4, step: 0.005 },
       { path: 'hand.lateralOffset', label: 'lateral offset m', min: 0, max: 2, step: 0.05 },
     ],
   },
@@ -270,7 +279,12 @@ export function loadSavedConfig(): void {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return
   try {
-    mergeInto(config as unknown as Nested, JSON.parse(raw) as Nested)
+    const saved = JSON.parse(raw) as Nested
+    // Older builds saved the `kite` alias as its own object. Merging it back would
+    // write whichever kite was selected at the time into `kites.diamond`, so drop it
+    // and let `kites` carry the per-kite values.
+    delete saved.kite
+    mergeInto(config as unknown as Nested, saved)
     // The saved copy carries `kites` but not the `kite` alias, so repoint it.
     selectKite(config.kiteType)
     validateSelects()

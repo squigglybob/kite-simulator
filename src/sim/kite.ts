@@ -1,5 +1,5 @@
 import { config } from './config'
-import { bridleGeometry } from './bridle'
+import { bridleGeometry, dualBridle, isDualLine } from './bridle'
 import { hasKeel, keelGeometry } from './keel'
 import {
   dragCoefficient,
@@ -58,6 +58,16 @@ const LAUNCH_TILT = 38 * DEG
 const MAX_SPEED = 90
 const MAX_SPIN = 40
 
+/**
+ * Where the flyer is holding the line, or lines. A single-liner only reads `centre`;
+ * a stunt kite reads the two hands and ignores it.
+ */
+export interface Grips {
+  centre: Vec3
+  left: Vec3
+  right: Vec3
+}
+
 export interface KiteDiagnostics {
   apparent: Vec3
   windDir: Vec3
@@ -76,6 +86,9 @@ export interface KiteDiagnostics {
   /** Wingtip to wingtip, in world space. */
   span: Vec3
   line: LineState
+  /** The two lines separately. Both are the single line on a one-line kite. */
+  lineLeft: LineState
+  lineRight: LineState
   elevation: number
   azimuth: number
   /** Bank angle for the instrument readout, radians. */
@@ -111,6 +124,10 @@ export class Kite {
     nose: v3(0, 1, 0),
     span: v3(1, 0, 0),
     line: { dir: v3(0, 1, 0), distance: 0, extension: 0, tension: 0 },
+
+    lineLeft: { dir: v3(0, 1, 0), distance: 0, extension: 0, tension: 0 },
+
+    lineRight: { dir: v3(0, 1, 0), distance: 0, extension: 0, tension: 0 },
     elevation: 0,
     azimuth: 0,
     roll: 0,
@@ -206,7 +223,8 @@ export class Kite {
     this.normal = normalize(cross(this.span, this.nose))
   }
 
-  step(dt: number, handPos: Vec3, time: number): void {
+  step(dt: number, grips: Grips, time: number): void {
+    const handPos = grips.centre
     const k = config.kite
     this.prevPos = copy(this.pos)
 
@@ -214,7 +232,6 @@ export class Kite {
     const wind = windAt(this.pos, time)
     const apparent = sub(wind, this.vel)
     const airspeed = length(apparent)
-    const line = solveLine(this.pos, handPos, this.vel)
 
     // --- The sail, as two panels ---------------------------------------------------
     // Not one flat plate but two, hinged along the spine and tilted up out of the flat
@@ -393,20 +410,93 @@ export class Kite {
     aero.y = aeroTotal.y
     aero.z = aeroTotal.z
 
-    const tensionForce = scale(line.dir, -line.tension)
+    // --- The line, or lines ----------------------------------------------------------
+    // A tow point in world offsets from the kite's centre: down the spine, out across
+    // the span, and standing off the windward face — which is the side away from the
+    // normal.
+    const towPointAt = (along: number, across: number, standoff: number): Vec3 =>
+      add(
+        add(
+          scale(this.nose, along * size.spine),
+          scale(this.span, across * size.span * 0.5),
+        ),
+        scale(this.normal, -standoff * size.spine),
+      )
+
+    const tensionForce = v3()
+    let line: LineState
+
+    if (isDualLine()) {
+      // Two lines, each tied to its own tow point out toward its own wingtip, each
+      // pulling independently. The steering is not a torque anyone applies: it is
+      // just two tensions at two different places, and it comes out as rotation
+      // because they are not the same.
+      //
+      // Which rotation depends on the geometry. A line pulling square to the sail at
+      // a point offset across the span can only roll the kite, and roll is the axis
+      // the dihedral exists to resist. What turns a stunt kite is *yaw* — rotation in
+      // the plane of its own sail — and that needs the pull to have a component along
+      // the spine, which is what the tow point's standoff and its station down the
+      // spine between them provide.
+      const left = dualBridle(-1)
+      const right = dualBridle(1)
+      const leftAt = towPointAt(left.along, left.across, left.standoff)
+      const rightAt = towPointAt(right.along, right.across, right.standoff)
+      // Which hand runs to which tow point. See `steerInvert` in the config for why
+      // this is not simply left-to-left.
+      const leftGrip = k.steerInvert ? grips.right : grips.left
+      const rightGrip = k.steerInvert ? grips.left : grips.right
+
+      // The damping velocity is the tow point's, not the kite's centre — and that
+      // distinction is the whole difference between a kite that steers and one that
+      // rings like a bell. The lines drive the kite's rotation, so the motion they
+      // have to damp is the rotation: pass the centre's velocity and the two lines
+      // become a stiff torsional spring with no damper across it, and a hand movement
+      // sets up a 7 Hz oscillation instead of a turn.
+      const leftLine = solveLine(
+        add(this.pos, leftAt),
+        leftGrip,
+        add(this.vel, cross(this.spin, leftAt)),
+        config.line.length,
+      )
+      const rightLine = solveLine(
+        add(this.pos, rightAt),
+        rightGrip,
+        add(this.vel, cross(this.spin, rightAt)),
+        config.line.length,
+      )
+
+      const leftForce = scale(leftLine.dir, -leftLine.tension)
+      const rightForce = scale(rightLine.dir, -rightLine.tension)
+      addScaledInPlace(tensionForce, leftForce, 1)
+      addScaledInPlace(tensionForce, rightForce, 1)
+      addScaledInPlace(torque, cross(leftAt, leftForce), 1)
+      addScaledInPlace(torque, cross(rightAt, rightForce), 1)
+
+      this.diag.lineLeft = leftLine
+      this.diag.lineRight = rightLine
+      // One representative line for the HUD, the sag and the flyer's pose. The mean
+      // of the pair is what the flyer feels through both arms.
+      line = {
+        dir: normalize(sub(this.pos, handPos)),
+        distance: length(sub(this.pos, handPos)),
+        extension: (leftLine.extension + rightLine.extension) * 0.5,
+        tension: leftLine.tension + rightLine.tension,
+      }
+    } else {
+      line = solveLine(this.pos, handPos, this.vel)
+      addScaledInPlace(tensionForce, scale(line.dir, -line.tension), 1)
+
+      const bridle = bridleGeometry()
+      const towPoint = towPointAt(bridle.along, 0, bridle.standoff)
+      addScaledInPlace(torque, cross(towPoint, tensionForce), 1)
+      this.diag.lineLeft = line
+      this.diag.lineRight = line
+    }
 
     // --- Forces ------------------------------------------------------------------
     const force = add(aero, tensionForce)
     force.y -= k.mass * config.env.gravity
-
-    // --- Torques -------------------------------------------------------------------
-    const bridle = bridleGeometry()
-    const towPoint = add(
-      scale(this.nose, bridle.along * size.spine),
-      // The bridle stands off the windward face, which is opposite the normal.
-      scale(this.normal, -bridle.standoff * size.spine),
-    )
-    addScaledInPlace(torque, cross(towPoint, tensionForce), 1)
 
     // The tail hangs behind and below on a lever arm, and its *weight* is a pendulum:
     // gravity pulling on it keeps the kite the right way up. Unlike everything else

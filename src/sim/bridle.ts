@@ -1,6 +1,6 @@
 import { config } from './config'
 import { hasKeel, keelGeometry } from './keel'
-import { LOWER_BRIDLE, SPAR } from './shape'
+import { LOWER_BRIDLE, NOSE, SPAR, TAIL } from './shape'
 
 /**
  * Bridle geometry.
@@ -65,4 +65,69 @@ export function bridleGeometry(): BridleGeometry {
       : Math.PI / 2
 
   return { along, standoff, angle }
+}
+
+/**
+ * The dual-line bridle.
+ *
+ * Three anchors a side, which is what a stunt kite actually carries: one on the spine
+ * shared by both sides, one out on each leading edge level with it, and one further
+ * forward up each leading edge. The two forward legs and the shared spine leg meet at
+ * a tow point out to that side, and the flying line ties on there. Two tow points, two
+ * lines, and the gap between them is the whole of the steering.
+ *
+ * The wing anchors are placed *on the leading edge spar* rather than given their own
+ * spanwise numbers, because that is where a bridle is physically tied. Their spanwise
+ * position therefore falls out of how far down the spine they sit, and moving one
+ * slides it along the spar exactly as it would on a real kite.
+ *
+ * The tow point is given directly rather than solved from three leg lengths. Three
+ * spheres meet in a point only when their radii agree, and a slider that can be
+ * dragged into a bridle with no solution is a bad slider; giving the position and
+ * reading the leg lengths off it cannot fail, and on a stunt kite the setting you
+ * actually adjust is where that point sits.
+ */
+
+/** A point on the sail, in spine-lengths along and in fractions of the half span. */
+export interface BridleAnchor {
+  along: number
+  across: number
+}
+
+export interface DualBridle {
+  /** The shared spine anchor, and the two on this side's leading edge. */
+  anchors: BridleAnchor[]
+  /** Where this side's flying line ties on. */
+  along: number
+  across: number
+  standoff: number
+}
+
+/** Where the leading edge sits, spanwise, at a given station down the spine. */
+function leadingEdgeAt(along: number): number {
+  const t = (NOSE - along) / (NOSE - TAIL)
+  return Math.max(0, Math.min(1, t))
+}
+
+/**
+ * One side's bridle. `side` is -1 for the left tow point and +1 for the right; the
+ * spine anchor is shared, so it comes back with both.
+ */
+export function dualBridle(side: number): DualBridle {
+  const k = config.kite
+  const s = Math.sign(side) || 1
+  return {
+    anchors: [
+      { along: k.bridleAftAlong, across: 0 },
+      { along: k.bridleAftAlong, across: s * leadingEdgeAt(k.bridleAftAlong) },
+      { along: k.bridleForeAlong, across: s * leadingEdgeAt(k.bridleForeAlong) },
+    ],
+    along: k.towAlong,
+    across: s * k.towSpread,
+    standoff: k.towStandoff,
+  }
+}
+
+export function isDualLine(): boolean {
+  return config.kite.dualLine
 }

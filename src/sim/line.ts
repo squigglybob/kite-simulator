@@ -19,11 +19,18 @@ export interface LineState {
   tension: number
 }
 
-export function solveLine(kitePos: Vec3, handPos: Vec3, kiteVel: Vec3): LineState {
+export function solveLine(
+  kitePos: Vec3,
+  handPos: Vec3,
+  kiteVel: Vec3,
+  /** Set length of this line. Given per line, because a two-line kite steers by
+   *  having one of them shorter than the other. */
+  lineLength = config.line.length,
+): LineState {
   const offset = sub(kitePos, handPos)
   const distance = length(offset)
   const dir = normalize(offset)
-  const extension = distance - config.line.length
+  const extension = distance - lineLength
 
   let tension = 0
   if (extension > 0) {

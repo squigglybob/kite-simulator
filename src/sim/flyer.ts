@@ -1,5 +1,5 @@
 import { config } from './config'
-import { add, cross, normalize, scale, v3, length, type Vec3 } from '../core/vec3'
+import { add, cross, normalize, scale, sub, v3, length, type Vec3 } from '../core/vec3'
 
 /**
  * The flyer's hands.
@@ -26,6 +26,14 @@ export class Flyer {
 
   /** Where the hands actually are, after the pull is applied. */
   handPos: Vec3 = v3(0, config.hand.height, 0)
+  /**
+   * The two hands separately, which is what a dual-line kite is flown with. On a
+   * single-liner they sit either side of `handPos` and nothing reads them; on a
+   * stunt kite each holds its own line and the gap between their pulls is the
+   * steering.
+   */
+  leftHand: Vec3 = v3(0, config.hand.height, 0)
+  rightHand: Vec3 = v3(0, config.hand.height, 0)
 
   /** Combined pull, 0 to 1. Drives arm pose and the tension the player feels. */
   get pull(): number {
@@ -55,6 +63,19 @@ export class Flyer {
     const sideways = scale(lateral, this.differential * h.lateralOffset)
 
     this.handPos = add(add(rest, back), sideways)
+
+    // Each hand on its own line: drawn back by its own pull, and held out to its own
+    // side. Pulling one hand back stretches that line and slackens the other, which
+    // is exactly how a stunt kite is steered.
+    const half = scale(lateral, config.hand.separation * 0.5)
+    this.leftHand = add(
+      sub(rest, half),
+      scale(lineDir, -this.leftDraw * h.steerDepth),
+    )
+    this.rightHand = add(
+      add(rest, half),
+      scale(lineDir, -this.rightDraw * h.steerDepth),
+    )
   }
 }
 

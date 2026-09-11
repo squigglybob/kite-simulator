@@ -114,6 +114,8 @@ export class MusicEngine {
     chain.setWow(this.params.wowDepth, this.params.wowRate)
     chain.setReverb(Math.min(1, this.params.reverbMix * this.reverbDrift))
     chain.setPadCutoff(this.params.brightness * this.cutoffDrift)
+    chain.setPadLfo(this.params.padLfoDepth, this.params.padLfoSeconds)
+    chain.setPadFilterLfo(this.params.padFilterLfoDepth, this.params.padFilterLfoSeconds)
     // The only one that is not just a gain: the impulse response has to be regenerated,
     // so it is left until the value has actually changed.
     if (this.params.reverbSeconds !== previous.reverbSeconds) {
@@ -140,7 +142,7 @@ export class MusicEngine {
     this.reverbDrift = this.params.reverbMix > 0 ? now.reverb / this.params.reverbMix : 1
     this.cutoffDrift = this.params.brightness > 0 ? now.cutoff / this.params.brightness : 1
     chain.setVoiceGains(this.params)
-    chain.setPadSwell(now.pad)
+    chain.setPadSection(now.pad)
     chain.setPadCutoff(now.cutoff)
     chain.setReverb(now.reverb)
 

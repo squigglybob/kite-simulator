@@ -33,11 +33,19 @@ const GROUPS: { title: string; faders: Fader[] }[] = [
     faders: [
       { key: 'gain', label: 'master', min: 0, max: 1, step: 0.01 },
       { key: 'padGain', label: 'pad', min: 0, max: 1, step: 0.01 },
-      { key: 'swellDepth', label: 'pad swell', min: 0, max: 0.9, step: 0.02 },
       { key: 'bassGain', label: 'bass', min: 0, max: 1, step: 0.01 },
       { key: 'bassOctave', label: 'bass octave', min: 0, max: 1, step: 0.01, later: true },
       { key: 'bellGain', label: 'bells', min: 0, max: 1, step: 0.01 },
       { key: 'hiss', label: 'hiss', min: 0, max: 0.2, step: 0.005 },
+    ],
+  },
+  {
+    title: 'Pad LFOs',
+    faders: [
+      { key: 'padLfoDepth', label: 'volume depth', min: 0, max: 0.9, step: 0.02 },
+      { key: 'padLfoSeconds', label: 'volume period s', min: 2, max: 120, step: 1 },
+      { key: 'padFilterLfoDepth', label: 'filter depth', min: 0, max: 1, step: 0.02 },
+      { key: 'padFilterLfoSeconds', label: 'filter period s', min: 2, max: 120, step: 1 },
     ],
   },
   {

@@ -319,24 +319,34 @@ export class Kite {
     )
 
     // --- Integrate -------------------------------------------------------------------
-    const invMass = 1 / k.mass
+    // The tail's weight is applied as a force above, so its mass has to be in the
+    // denominator too or the kite falls faster than gravity: 0.14 kg of tail pulling
+    // on 0.25 kg of kite came out at 1.56 g. A flying kite is the whole assembly.
+    const invMass = 1 / (k.mass + tailMass)
     addScaledInPlace(this.vel, force, dt * invMass)
 
     const speed = length(this.vel)
     if (speed > MAX_SPEED) this.vel = scale(this.vel, MAX_SPEED / speed)
     addScaledInPlace(this.pos, this.vel, dt)
 
-    // Thin-plate moments of inertia, one per body axis. The gyroscopic coupling term is
-    // left out: at these rates it is far below the aerodynamic torques.
-    const scaleI = (k.mass / 12) * k.inertiaScale
-    // The tail's mass out on its arm is a real part of how hard the kite is to turn,
-    // and about both axes the arm swings through. On the spine itself it contributes
-    // nothing, which is why roll is left alone.
-    const tailSwing = tailMass * tailArmLength * tailArmLength
+    // Thin-plate moments of inertia, one per body axis, at their textbook values. The
+    // gyroscopic coupling term is left out: at these rates it is far below the
+    // aerodynamic torques.
+    //
+    // The tail is deliberately absent here, and that is the whole point of a tail. It
+    // is a flexible streamer, not a spar: the kite has to drag its mass along, which is
+    // why it counts toward `invMass` above, but it does not have to be *angularly
+    // accelerated* with the body — it trails and flexes instead. Counting it as a rigid
+    // point mass on a 1.6 m arm put 79% of the pitch inertia into the tail and made the
+    // kite twelve times harder to turn than the plate it is, so a stall became a slow
+    // wallow with a 2.9 second period instead of the quick rotation about the bridle a
+    // real kite does. Its stabilising work is done by the pendulum and drag torques
+    // above, which is how a tail actually steadies a kite.
+    const scaleI = k.mass / 12
     const rollInertia = Math.max(scaleI * size.span * size.span, 1e-6)
-    const pitchInertia = Math.max(scaleI * size.spine * size.spine + tailSwing, 1e-6)
+    const pitchInertia = Math.max(scaleI * size.spine * size.spine, 1e-6)
     const yawInertia = Math.max(
-      scaleI * (size.spine * size.spine + size.span * size.span) + tailSwing,
+      scaleI * (size.spine * size.spine + size.span * size.span),
       1e-6,
     )
 

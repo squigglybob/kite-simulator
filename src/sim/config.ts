@@ -54,9 +54,6 @@ export interface Config {
      */
     cpBase: number
     cpSlope: number
-    /** Multiplier on the thin-plate moments of inertia. Higher is a heavier, slower
-     *  turn — spars, tail and hem all add rotational mass a flat plate does not have. */
-    inertiaScale: number
     /** The tail's drag area in square metres, and how far behind the centre of mass
      *  it acts, in spine-lengths. Being on a lever arm is what makes it *restore*
      *  attitude and not merely damp it — and it stops working in still air, which is
@@ -206,7 +203,6 @@ export const config: Config = {
     bridleLower: 0.413,
     cpBase: -0.16,
     cpSlope: -0.3,
-    inertiaScale: 2.5,
     tailDrag: 0.02,
     tailArm: 1.2,
     tailMassPerMetre: 0.04,

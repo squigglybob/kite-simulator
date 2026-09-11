@@ -69,7 +69,6 @@ const SECTIONS: Section[] = [
       { path: 'kite.bridleLower', label: 'bridle lower leg', min: 0.33, max: 0.58, step: 0.002 },
       { path: 'kite.cpBase', label: 'pressure centre', min: -0.35, max: 0.15, step: 0.002 },
       { path: 'kite.cpSlope', label: 'pressure travel', min: -1, max: -0.02, step: 0.01 },
-      { path: 'kite.inertiaScale', label: 'turn inertia x', min: 0.3, max: 10, step: 0.1 },
       { path: 'kite.tailDrag', label: 'tail drag m2', min: 0, max: 0.4, step: 0.002 },
       { path: 'kite.tailArm', label: 'tail arm x spine', min: 0.4, max: 4, step: 0.05 },
       { path: 'kite.tailMassPerMetre', label: 'tail kg per m', min: 0, max: 0.08, step: 0.001 },

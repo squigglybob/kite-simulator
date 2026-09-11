@@ -25,9 +25,9 @@ export interface Shape {
   /** Pad filter corner in Hz, already drifted. */
   cutoff: number
   /**
-   * Pad level, 0 to 1. Never zero: the chords are the one thing always present, so this
-   * swells and fades rather than dropping out. Applied continuously on the pad's bus
-   * rather than per note, so it glides instead of stepping at each chord.
+   * Pad level from the section arrangement, 0 to 1, never zero. The swelling and fading
+   * is an LFO in `fx.ts` and does not appear here — this is only how far a `hushed`
+   * section pulls the chords back.
    */
   pad: number
   /** Reverb send, 0 to 1, already drifted. */
@@ -51,14 +51,12 @@ const CUTOFF_PERIOD = 97
 const REVERB_PERIOD = 131
 const REGISTER_PERIOD = 149
 const DENSITY_PERIOD = 71
-const SWELL_PERIOD = 113
 
 /** Separate seed offsets, or all four walks would be the same curve. */
 const CUTOFF_SEED = 0
 const REVERB_SEED = 2311
 const REGISTER_SEED = 5417
 const DENSITY_SEED = 7919
-const SWELL_SEED = 3767
 const SECTION_SEED = 104729
 const VARIANT_SEED = 15485863
 
@@ -114,7 +112,6 @@ export function shapeAt(t: number, params: MusicParams, seed: number): Shape {
   const reverb = fbm1D(t / REVERB_PERIOD, 3, seed + REVERB_SEED)
   const register = fbm1D(t / REGISTER_PERIOD, 2, seed + REGISTER_SEED)
   const density = fbm1D(t / DENSITY_PERIOD, 3, seed + DENSITY_SEED)
-  const swell = fbm1D(t / SWELL_PERIOD, 3, seed + SWELL_SEED)
 
   const sectionSeconds = Math.max(10, params.sectionSeconds)
   const index = Math.floor(t / sectionSeconds)
@@ -138,7 +135,7 @@ export function shapeAt(t: number, params: MusicParams, seed: number): Shape {
     reverb: Math.min(1, params.reverbMix * lerp(0.7, 1.35, reverb)),
     register: register * 2 - 1,
     density: lerp(0.6, 1.15, density),
-    pad: (1 - params.swellDepth * (1 - swell)) * (dropped ? variant.pad : 1),
+    pad: dropped ? variant.pad : 1,
     bass: dropped ? variant.bass : 1,
     bells: dropped ? variant.bells : 1,
     section: dropped ? name : 'full',

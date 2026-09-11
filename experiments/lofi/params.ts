@@ -47,11 +47,19 @@ export interface MusicParams {
    */
   bassOctave: number
   /**
-   * How far the chords swell and fade, 0 to 0.9. At zero the pad holds one level; at
-   * 0.5 it breathes between half volume and full. The chords never drop out whatever
-   * this is set to — they are the one voice always present.
+   * The pad's volume LFO: how far it ducks below the fader setting, 0 to 0.9, and how
+   * long one cycle takes. The LFO only ever ducks — its peak is the level the pad fader
+   * is set to — so the chords swell and fade without ever dropping out.
    */
-  swellDepth: number
+  padLfoDepth: number
+  padLfoSeconds: number
+  /**
+   * The pad's filter LFO, as a fraction of the current cutoff rather than a fixed
+   * number of hertz, so moving the brightness fader does not change the width of the
+   * sweep and the corner can never be driven to zero.
+   */
+  padFilterLfoDepth: number
+  padFilterLfoSeconds: number
 
   /** Roughly how many bell notes sound per minute, before drift and dropouts. */
   bellRate: number
@@ -89,7 +97,10 @@ export const BEACH: MusicParams = {
   bassGain: 0.38,
   bellGain: 0.3,
   bassOctave: 0.5,
-  swellDepth: 0.45,
+  padLfoDepth: 0.35,
+  padLfoSeconds: 26,
+  padFilterLfoDepth: 0.3,
+  padFilterLfoSeconds: 37,
 
   bellRate: 4,
 

@@ -50,8 +50,12 @@ export interface Chain {
   setReverb(amount: number): void
   /** The pad's lowpass corner. One filter on the bus, not one per note. */
   setPadCutoff(hz: number): void
-  /** The drift's swell on the pad, 0 to 1, multiplied with the pad fader. */
-  setPadSwell(level: number): void
+  /** The section's level for the pad, 0 to 1. Arrangement, not movement. */
+  setPadSection(level: number): void
+  /** Depth 0 to 0.9 and period in seconds for the pad's volume LFO. */
+  setPadLfo(depth: number, seconds: number): void
+  /** Depth 0 to 1 and period in seconds for the pad's filter LFO. */
+  setPadFilterLfo(depth: number, seconds: number): void
   setHiss(level: number): void
   setWow(depth: number, rate: number): void
   /** Regenerates the impulse response. Cheap, but not free — debounce a slider. */
@@ -186,15 +190,44 @@ export function createChain(
   padFilter.frequency.value = params.brightness
   padFilter.Q.value = 0.6
 
-  // The swell is a separate node from the bus so that the fader and the drift do not
-  // fight over one gain. It also wants a far slower glide: the fader should feel
-  // immediate, whereas the swell is meant to be something you never catch happening.
-  const padSwell = ctx.createGain()
-  padSwell.gain.value = 1
+  // Three gains in the pad path rather than one, because three different things want to
+  // set its level and none of them should have to know about the others: the fader, the
+  // section arrangement, and the LFO.
+  const padSection = ctx.createGain()
+  padSection.gain.value = 1
+
+  // The LFO's own node. Its gain sits at the centre of the sweep and the oscillator is
+  // summed into that param, which is how an AudioParam combines automation with a
+  // connected signal — so the value is centre ± depth without either side knowing.
+  const padLfoGain = ctx.createGain()
+  padLfoGain.gain.value = 1
+  const padLfo = ctx.createOscillator()
+  padLfo.type = 'sine'
+  const padLfoDepth = ctx.createGain()
+  padLfoDepth.gain.value = 0
+  padLfo.connect(padLfoDepth)
+  padLfoDepth.connect(padLfoGain.gain)
+  padLfo.start()
+
+  // The filter LFO works the same way, on top of whatever the drift has set as the
+  // corner. Its depth is a fraction of that corner rather than a fixed number of hertz,
+  // so sweeping the brightness fader does not change how wide the sweep is, and the
+  // frequency can never be driven to or below zero.
+  const filterLfo = ctx.createOscillator()
+  filterLfo.type = 'sine'
+  const filterLfoDepth = ctx.createGain()
+  filterLfoDepth.gain.value = 0
+  filterLfo.connect(filterLfoDepth)
+  filterLfoDepth.connect(padFilter.frequency)
+  filterLfo.start()
+
+  let cutoffCentre = params.brightness
+  let filterDepthFraction = 0
 
   pad.bus.disconnect()
-  pad.bus.connect(padSwell)
-  padSwell.connect(padFilter)
+  pad.bus.connect(padSection)
+  padSection.connect(padLfoGain)
+  padLfoGain.connect(padFilter)
   padFilter.connect(dry)
   padFilter.connect(pad.send)
 
@@ -256,10 +289,26 @@ export function createChain(
       glide(bell.send.gain, Math.min(1, amount * BELL_SEND_SHARE))
     },
     setPadCutoff(hz) {
-      padFilter.frequency.setTargetAtTime(Math.max(60, hz), ctx.currentTime, 1.5)
+      cutoffCentre = Math.max(60, hz)
+      padFilter.frequency.setTargetAtTime(cutoffCentre, ctx.currentTime, 1.5)
+      // The sweep is proportional, so moving the centre moves the depth with it.
+      glide(filterLfoDepth.gain, cutoffCentre * filterDepthFraction * 0.8)
     },
-    setPadSwell(level) {
-      padSwell.gain.setTargetAtTime(Math.max(0, level), ctx.currentTime, 2.5)
+    setPadSection(level) {
+      padSection.gain.setTargetAtTime(Math.max(0, level), ctx.currentTime, 2.5)
+    },
+    setPadLfo(depth, seconds) {
+      const half = Math.max(0, Math.min(0.9, depth)) / 2
+      // Centre the sweep so the peak is unity: the LFO only ever ducks the pad, it never
+      // pushes it above the level the fader is set to.
+      glide(padLfoGain.gain, 1 - half)
+      glide(padLfoDepth.gain, half)
+      glide(padLfo.frequency, 1 / Math.max(0.5, seconds))
+    },
+    setPadFilterLfo(depth, seconds) {
+      filterDepthFraction = Math.max(0, Math.min(1, depth))
+      glide(filterLfoDepth.gain, cutoffCentre * filterDepthFraction * 0.8)
+      glide(filterLfo.frequency, 1 / Math.max(0.5, seconds))
     },
     setHiss(level) {
       glide(hissGain.gain, level * 0.12)
@@ -275,11 +324,15 @@ export function createChain(
     },
     dispose() {
       for (const lfo of lfos) lfo.stop()
+      padLfo.stop()
+      filterLfo.stop()
       hissSource.stop()
       master.disconnect()
     },
   }
 
   chain.setVoiceGains(params)
+  chain.setPadLfo(params.padLfoDepth, params.padLfoSeconds)
+  chain.setPadFilterLfo(params.padFilterLfoDepth, params.padFilterLfoSeconds)
   return chain
 }

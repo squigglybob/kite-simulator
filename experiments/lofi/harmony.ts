@@ -8,9 +8,16 @@
  * varies — which notes of the chord sound, in what register, spread how wide, entering
  * when — is generated on top of that fixed base.
  *
- * The pool is D aeolian throughout. No leading tone and no dominant seventh anywhere,
- * which is what keeps it from ever sounding like it wants to resolve: a progression
- * that implies an ending is the wrong shape for music meant to run for an hour.
+ * Each set is one mode, written out as diatonic sevenths so that any order of any
+ * subset of it stays coherent. What separates them is not difficulty but colour: the
+ * major fourth that makes dorian hopeful, the flat second that makes phrygian dark, the
+ * sharp fourth that makes lydian float. None of them contains a leading tone resolving
+ * to a dominant seventh, which is what keeps every set from sounding like it wants to
+ * end — a progression that implies an ending is the wrong shape for music meant to run
+ * for an hour.
+ *
+ * Every set is written relative to the tonic, so the `root` parameter transposes all of
+ * them and the sets differ only in flavour.
  */
 
 import type { MusicParams } from './params'
@@ -24,15 +31,83 @@ export interface Chord {
   intervals: number[]
 }
 
-/** Ordered by root so that adjacent indices are adjacent scale degrees. */
-export const POOL: Chord[] = [
-  { name: 'i m9', root: 0, intervals: [0, 3, 7, 10, 14] },
-  { name: 'III maj7', root: 3, intervals: [0, 4, 7, 11, 14] },
-  { name: 'iv m11', root: 5, intervals: [0, 3, 7, 10, 17] },
-  { name: 'v m7', root: 7, intervals: [0, 3, 7, 10, 14] },
-  { name: 'VI maj7', root: 8, intervals: [0, 4, 7, 11, 14] },
-  { name: 'VII sus2', root: 10, intervals: [0, 2, 7, 11] },
-]
+export interface ChordSet {
+  /** Shown in the picker. */
+  label: string
+  /** What it feels like, so the choice can be made without playing all of them. */
+  feel: string
+  /** Ordered by root, so adjacent indices are adjacent scale degrees. */
+  chords: Chord[]
+}
+
+export const CHORD_SETS = {
+  aeolian: {
+    label: 'Aeolian',
+    feel: 'warm, wistful, settled — the original beach set',
+    chords: [
+      { name: 'i m9', root: 0, intervals: [0, 3, 7, 10, 14] },
+      { name: 'III maj7', root: 3, intervals: [0, 4, 7, 11, 14] },
+      { name: 'iv m11', root: 5, intervals: [0, 3, 7, 10, 17] },
+      { name: 'v m7', root: 7, intervals: [0, 3, 7, 10, 14] },
+      { name: 'VI maj7', root: 8, intervals: [0, 4, 7, 11, 14] },
+      { name: 'VII sus2', root: 10, intervals: [0, 2, 7, 11] },
+    ],
+  },
+  dorian: {
+    label: 'Dorian',
+    feel: 'wistful but hopeful — the major fourth is what lifts it',
+    chords: [
+      { name: 'i m9', root: 0, intervals: [0, 3, 7, 10, 14] },
+      { name: 'ii m7', root: 2, intervals: [0, 3, 7, 10] },
+      { name: 'III maj7', root: 3, intervals: [0, 4, 7, 11, 14] },
+      { name: 'IV maj7', root: 5, intervals: [0, 4, 7, 11, 14] },
+      { name: 'v m7', root: 7, intervals: [0, 3, 7, 10, 14] },
+      { name: 'VII maj7', root: 10, intervals: [0, 4, 7, 11] },
+    ],
+  },
+  lydian: {
+    label: 'Lydian',
+    feel: 'bright, floating, unresolved — the sharp fourth never lands',
+    chords: [
+      { name: 'I maj9', root: 0, intervals: [0, 4, 7, 11, 14] },
+      { name: 'II add9', root: 2, intervals: [0, 4, 7, 14] },
+      { name: 'iii m7', root: 4, intervals: [0, 3, 7, 10] },
+      { name: 'V maj7', root: 7, intervals: [0, 4, 7, 11, 14] },
+      { name: 'vi m9', root: 9, intervals: [0, 3, 7, 10, 14] },
+      { name: 'vii m7', root: 11, intervals: [0, 3, 7, 10] },
+    ],
+  },
+  phrygian: {
+    label: 'Phrygian',
+    feel: 'dark and still — the flat second gives it the shadow',
+    chords: [
+      { name: 'i m9', root: 0, intervals: [0, 3, 7, 10, 14] },
+      { name: 'II maj7', root: 1, intervals: [0, 4, 7, 11] },
+      { name: 'III maj7', root: 3, intervals: [0, 4, 7, 11, 14] },
+      { name: 'iv m7', root: 5, intervals: [0, 3, 7, 10, 17] },
+      { name: 'VI maj7', root: 8, intervals: [0, 4, 7, 11] },
+      { name: 'vii m7', root: 10, intervals: [0, 3, 7, 10] },
+    ],
+  },
+  quartal: {
+    label: 'Quartal',
+    feel: 'open and placeless — fourths imply no key, so it never resolves',
+    chords: [
+      { name: 'sus 0', root: 0, intervals: [0, 5, 10, 15] },
+      { name: 'sus 2', root: 2, intervals: [0, 5, 10] },
+      { name: 'sus 5', root: 5, intervals: [0, 5, 10, 15] },
+      { name: 'sus 7', root: 7, intervals: [0, 5, 10] },
+      { name: 'sus 9', root: 9, intervals: [0, 5, 10, 15] },
+      { name: 'sus 10', root: 10, intervals: [0, 5, 10] },
+    ],
+  },
+} as const satisfies Record<string, ChordSet>
+
+export type ChordSetName = keyof typeof CHORD_SETS
+
+export const CHORD_SET_NAMES = Object.keys(CHORD_SETS) as ChordSetName[]
+
+export const chordsOf = (name: ChordSetName): readonly Chord[] => CHORD_SETS[name].chords
 
 /**
  * Weight for a move of n scale steps, where the pool wraps so the largest possible
@@ -81,14 +156,22 @@ function fold(midi: number, low: number, high: number): number {
 }
 
 /** Circular distance between two pool indices. */
-const stepsBetween = (a: number, b: number): number => {
-  const raw = Math.abs(a - b) % POOL.length
-  return Math.min(raw, POOL.length - raw)
+const stepsBetween = (a: number, b: number, size: number): number => {
+  const raw = Math.abs(a - b) % size
+  return Math.min(raw, size - raw)
 }
 
-export function nextChord(current: number, rng: () => number): number {
-  const weights = POOL.map((_, i) => {
-    const step = STEP_WEIGHT[stepsBetween(current, i)] ?? 0
+/**
+ * The next chord, chosen from whichever set is active. With a pool narrowed to one or
+ * two chords every weight would be zero and the walk would stall, so a single-chord pool
+ * simply stays put and a pair alternates.
+ */
+export function nextChord(current: number, rng: () => number, size: number): number {
+  if (size <= 1) return 0
+  if (size === 2) return current === 0 ? 1 : 0
+
+  const weights = Array.from({ length: size }, (_, i) => {
+    const step = STEP_WEIGHT[stepsBetween(current, i, size)] ?? 0
     // A zero is never rescued by the tonic pull. Without this guard, sitting on the
     // tonic gives it a weight of TONIC_PULL against its own zero and the progression
     // repeats a chord roughly once every seventy.

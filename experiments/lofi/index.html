@@ -35,6 +35,15 @@
       label span { display: flex; justify-content: space-between; color: #93a6b8; }
       label b { font-weight: normal; color: #d7e3ec; }
       input[type=range] { width: 100%; margin: 1px 0 0; accent-color: #7fb2d9; height: 14px; }
+      select { width: 100%; padding: 6px; background: #1b2430; color: #d7e3ec;
+        border: 1px solid #2b3440; font: inherit; }
+      #panel .row { margin: 6px 0 0; }
+      #panel .row button { padding: 6px; font-size: 11px; }
+      #panel .row button:disabled { opacity: 0.4; cursor: default; }
+      .feel { color: #5f7183; margin: 6px 0 8px; font-size: 11px; }
+      .chords { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; }
+      .chord { display: flex; align-items: center; gap: 5px; margin: 0; }
+      .chord input { accent-color: #7fb2d9; margin: 0; }
       /* Faders that cannot touch a note already sounding, only the next chord. */
       .later span::after { content: ' \21bb'; color: #5f7183; }
       .note { color: #5f7183; margin: 14px 0 0; }
@@ -53,7 +62,7 @@
         </dl>
         <div class="row">
           <button id="reseed" type="button">New seed</button>
-          <button id="copy" type="button">Copy params</button>
+          <button id="copy" type="button">Copy preset</button>
           <button id="reset" type="button">Reset</button>
         </div>
         <p class="note">&#8635; marks faders that apply from the next chord.<br />

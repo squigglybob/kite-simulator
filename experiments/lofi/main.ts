@@ -1,21 +1,25 @@
 /**
- * The experiment harness: transport, readout, and a fader per parameter.
+ * The experiment harness: transport, readout, presets, chord picker and a fader per
+ * parameter.
  *
  * The faders were not in the original plan — a play button was, on the grounds that the
- * harness should stay minimal. That was wrong, and audibly so: generative drone reveals
+ * harness should stay minimal. That was wrong and audibly so: generative drone reveals
  * itself over minutes, so judging a mix by editing a constant and reloading costs a
  * three-minute wait per guess. The distinction the panel draws between faders that land
  * immediately and faders that wait for the next chord matters more than it looks, since
  * a fader that appears to do nothing for ten seconds is worse than no fader at all.
  *
- * The seed lives in the URL so any run is bookmarkable, and the settings persist, so a
- * good mix survives the reload that finding the next one requires.
+ * The seed lives in the URL so any run is bookmarkable, the working state persists, and
+ * a setting worth keeping can be saved as a preset — which is the only way a good mix
+ * found by ear survives the next experiment.
  */
 
 import { MusicEngine } from './engine'
+import { CHORD_SETS, CHORD_SET_NAMES, chordsOf, type Chord, type ChordSetName } from './harmony'
 import { defaultParams, type MusicParams } from './params'
+import { BUILT_IN, isBuiltIn, loadSaved, remove, save, type Preset } from './presets'
 
-const STORAGE_KEY = 'lofi.params'
+const STATE_KEY = 'lofi.state'
 
 interface Fader {
   key: keyof MusicParams
@@ -109,24 +113,62 @@ const seed = Number.isFinite(fromUrl) && fromUrl > 0
 seedOut.textContent = String(seed)
 console.log(`seed ${seed} — ?seed=${seed} to hear this again`)
 
-/** Saved values are merged field by field, so adding a parameter never breaks a save. */
-function load(): MusicParams {
-  const params = defaultParams()
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return params
-    const saved = JSON.parse(raw) as Record<string, unknown>
-    for (const key of Object.keys(params) as (keyof MusicParams)[]) {
-      const value = saved[key]
-      if (typeof value === 'number' && Number.isFinite(value)) params[key] = value
-    }
-  } catch {
-    localStorage.removeItem(STORAGE_KEY)
-  }
-  return params
+/** Working state: what the panel currently shows, whether or not it matches a preset. */
+interface State {
+  preset: string
+  chordSet: ChordSetName
+  /** Indices of the enabled chords. Empty means the whole set. */
+  enabled: number[]
+  params: MusicParams
 }
 
-const params = load()
+function initialState(): State {
+  const base: State = {
+    preset: BUILT_IN[0].name,
+    chordSet: BUILT_IN[0].chordSet,
+    enabled: [],
+    params: defaultParams(),
+  }
+  try {
+    const raw = localStorage.getItem(STATE_KEY)
+    if (!raw) return base
+    const saved = JSON.parse(raw) as Partial<State>
+    if (saved.chordSet && saved.chordSet in CHORD_SETS) base.chordSet = saved.chordSet
+    if (Array.isArray(saved.enabled)) base.enabled = saved.enabled.filter((n) => typeof n === 'number')
+    if (typeof saved.preset === 'string') base.preset = saved.preset
+    // Field by field, so a state saved before a parameter existed still loads with that
+    // parameter at its default rather than undefined.
+    const params = saved.params as Record<string, unknown> | undefined
+    if (params) {
+      for (const key of Object.keys(base.params) as (keyof MusicParams)[]) {
+        const value = params[key]
+        if (typeof value === 'number' && Number.isFinite(value)) base.params[key] = value
+      }
+    }
+  } catch {
+    localStorage.removeItem(STATE_KEY)
+  }
+  return base
+}
+
+const state = initialState()
+
+function persist(): void {
+  try {
+    localStorage.setItem(STATE_KEY, JSON.stringify(state))
+  } catch {
+    // A full or blocked localStorage is no reason to stop the music.
+  }
+}
+
+/** The chords actually in play: the set, narrowed to the ticked ones. */
+function activeChords(): Chord[] {
+  const all = chordsOf(state.chordSet)
+  if (state.enabled.length === 0) return [...all]
+  const picked = state.enabled.filter((i) => i >= 0 && i < all.length).map((i) => all[i])
+  // Unticking everything would leave nothing to voice, so it means the whole set.
+  return picked.length > 0 ? picked : [...all]
+}
 
 // Created on the button press, not before: no browser will start an audio context
 // without a gesture, and one created early just sits suspended.
@@ -136,22 +178,181 @@ let startedAt = 0
 
 const controls = new Map<keyof MusicParams, { input: HTMLInputElement; readout: HTMLElement }>()
 
-function save(): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(params))
-  } catch {
-    // A full or blocked localStorage is no reason to stop the music.
-  }
-}
-
 const format = (fader: Fader, value: number): string =>
   fader.step >= 1 ? String(Math.round(value)) : value.toFixed(fader.step < 0.01 ? 3 : 2)
 
-for (const group of GROUPS) {
-  const heading = document.createElement('h2')
-  heading.textContent = group.title
-  panel.append(heading)
+// ---------------------------------------------------------------- preset and chords
 
+const presetSelect = document.createElement('select')
+const chordSetSelect = document.createElement('select')
+const chordList = document.createElement('div')
+chordList.className = 'chords'
+const deleteButton = document.createElement('button')
+deleteButton.type = 'button'
+deleteButton.textContent = 'Delete'
+
+function allPresets(): Preset[] {
+  return [...BUILT_IN, ...loadSaved()]
+}
+
+function refreshPresetList(): void {
+  const saved = loadSaved()
+  presetSelect.innerHTML = ''
+  for (const group of [
+    { label: 'Built in', items: BUILT_IN },
+    { label: 'Saved', items: saved },
+  ]) {
+    if (group.items.length === 0) continue
+    const optgroup = document.createElement('optgroup')
+    optgroup.label = group.label
+    for (const preset of group.items) {
+      const option = document.createElement('option')
+      option.value = preset.name
+      option.textContent = preset.name
+      optgroup.append(option)
+    }
+    presetSelect.append(optgroup)
+  }
+  const custom = document.createElement('option')
+  custom.value = ''
+  custom.textContent = '(edited)'
+  presetSelect.append(custom)
+  presetSelect.value = allPresets().some((p) => p.name === state.preset) ? state.preset : ''
+  deleteButton.disabled = state.preset === '' || isBuiltIn(state.preset)
+}
+
+function refreshChordList(): void {
+  chordList.innerHTML = ''
+  const chords = chordsOf(state.chordSet)
+  chords.forEach((chord, index) => {
+    const row = document.createElement('label')
+    row.className = 'chord'
+    const box = document.createElement('input')
+    box.type = 'checkbox'
+    box.checked = state.enabled.length === 0 || state.enabled.includes(index)
+    box.addEventListener('change', () => {
+      const ticked = state.enabled.length === 0
+        ? chords.map((_, i) => i)
+        : [...state.enabled]
+      const at = ticked.indexOf(index)
+      if (box.checked && at === -1) ticked.push(index)
+      if (!box.checked && at !== -1) ticked.splice(at, 1)
+      ticked.sort((a, b) => a - b)
+      state.enabled = ticked.length === chords.length ? [] : ticked
+      markEdited()
+      engine?.setChords(activeChords())
+      persist()
+    })
+    const text = document.createElement('span')
+    text.textContent = chord.name
+    row.append(box, text)
+    chordList.append(row)
+  })
+}
+
+/** Any hand change means the panel no longer matches the preset it was loaded from. */
+function markEdited(): void {
+  if (state.preset === '') return
+  state.preset = ''
+  presetSelect.value = ''
+  deleteButton.disabled = true
+}
+
+function applyPreset(preset: Preset): void {
+  state.preset = preset.name
+  state.chordSet = preset.chordSet
+  state.enabled = [...preset.chords]
+  state.params = { ...preset.params }
+  chordSetSelect.value = state.chordSet
+  refreshChordList()
+  refreshFaders()
+  refreshPresetList()
+  engine?.setParams(state.params)
+  engine?.setChords(activeChords())
+  persist()
+}
+
+function refreshFaders(): void {
+  for (const group of GROUPS) {
+    for (const fader of group.faders) {
+      const control = controls.get(fader.key)
+      if (!control) continue
+      control.input.value = String(state.params[fader.key])
+      control.readout.textContent = format(fader, state.params[fader.key])
+    }
+  }
+}
+
+// ------------------------------------------------------------------------ the panel
+
+function heading(text: string): void {
+  const h = document.createElement('h2')
+  h.textContent = text
+  panel.append(h)
+}
+
+heading('Preset')
+presetSelect.addEventListener('change', () => {
+  const chosen = allPresets().find((p) => p.name === presetSelect.value)
+  if (chosen) applyPreset(chosen)
+})
+panel.append(presetSelect)
+
+const presetButtons = document.createElement('div')
+presetButtons.className = 'row'
+const saveButton = document.createElement('button')
+saveButton.type = 'button'
+saveButton.textContent = 'Save as…'
+saveButton.addEventListener('click', () => {
+  const suggested = state.preset || 'My preset'
+  const name = window.prompt('Save these settings as', suggested)?.trim()
+  if (!name) return
+  if (isBuiltIn(name)) {
+    window.alert(`"${name}" is a built-in preset. Pick another name.`)
+    return
+  }
+  save({ name, chordSet: state.chordSet, chords: [...state.enabled], params: { ...state.params } })
+  state.preset = name
+  refreshPresetList()
+  persist()
+})
+deleteButton.addEventListener('click', () => {
+  if (!state.preset || isBuiltIn(state.preset)) return
+  if (!window.confirm(`Delete preset "${state.preset}"?`)) return
+  remove(state.preset)
+  state.preset = ''
+  refreshPresetList()
+  persist()
+})
+presetButtons.append(saveButton, deleteButton)
+panel.append(presetButtons)
+
+heading('Chords')
+for (const name of CHORD_SET_NAMES) {
+  const option = document.createElement('option')
+  option.value = name
+  option.textContent = CHORD_SETS[name].label
+  chordSetSelect.append(option)
+}
+chordSetSelect.value = state.chordSet
+const feel = document.createElement('p')
+feel.className = 'feel'
+const showFeel = (): void => { feel.textContent = CHORD_SETS[state.chordSet].feel }
+chordSetSelect.addEventListener('change', () => {
+  state.chordSet = chordSetSelect.value as ChordSetName
+  // A selection of indices means nothing once the set has changed underneath it.
+  state.enabled = []
+  showFeel()
+  refreshChordList()
+  markEdited()
+  engine?.setChords(activeChords())
+  persist()
+})
+showFeel()
+panel.append(chordSetSelect, feel, chordList)
+
+for (const group of GROUPS) {
+  heading(group.title)
   for (const fader of group.faders) {
     const label = document.createElement('label')
     if (fader.later) label.className = 'later'
@@ -161,7 +362,7 @@ for (const group of GROUPS) {
     name.style.fontStyle = 'normal'
     name.textContent = fader.label
     const value = document.createElement('b')
-    value.textContent = format(fader, params[fader.key])
+    value.textContent = format(fader, state.params[fader.key])
     caption.append(name, value)
 
     const input = document.createElement('input')
@@ -169,13 +370,14 @@ for (const group of GROUPS) {
     input.min = String(fader.min)
     input.max = String(fader.max)
     input.step = String(fader.step)
-    input.value = String(params[fader.key])
+    input.value = String(state.params[fader.key])
     input.addEventListener('input', () => {
       const next = Number(input.value)
-      params[fader.key] = next
+      state.params[fader.key] = next
       value.textContent = format(fader, next)
       engine?.setParams({ [fader.key]: next })
-      save()
+      markEdited()
+      persist()
     })
 
     controls.set(fader.key, { input, readout: value })
@@ -184,17 +386,10 @@ for (const group of GROUPS) {
   }
 }
 
-/** Pushes the current values back into the faders after a programmatic change. */
-function refresh(): void {
-  for (const group of GROUPS) {
-    for (const fader of group.faders) {
-      const control = controls.get(fader.key)
-      if (!control) continue
-      control.input.value = String(params[fader.key])
-      control.readout.textContent = format(fader, params[fader.key])
-    }
-  }
-}
+refreshPresetList()
+refreshChordList()
+
+// ------------------------------------------------------------------------ transport
 
 const clock = (seconds: number): string => {
   const whole = Math.max(0, Math.floor(seconds))
@@ -204,7 +399,7 @@ const clock = (seconds: number): string => {
 toggle.addEventListener('click', () => {
   if (!ctx) {
     ctx = new AudioContext()
-    engine = new MusicEngine(ctx, ctx.destination, params, seed)
+    engine = new MusicEngine(ctx, ctx.destination, state.params, seed, activeChords())
     engine.onChord = (report) => {
       chordOut.textContent = `${report.chord}  ${report.seconds.toFixed(1)}s  ${report.notes} notes`
       sectionOut.textContent = report.section
@@ -218,7 +413,8 @@ toggle.addEventListener('click', () => {
   } else {
     void ctx.resume()
     startedAt = ctx.currentTime
-    engine.setParams(params)
+    engine.setChords(activeChords())
+    engine.setParams(state.params)
     engine.start()
     toggle.textContent = 'Stop'
   }
@@ -230,16 +426,21 @@ required<HTMLButtonElement>('#reseed').addEventListener('click', () => {
 
 required<HTMLButtonElement>('#copy').addEventListener('click', async (event) => {
   const button = event.currentTarget as HTMLButtonElement
-  await navigator.clipboard.writeText(JSON.stringify(params, null, 2))
+  // The whole preset, not just the numbers: chords and settings together are what a
+  // feel actually is, and this is what gets pasted into presets.ts.
+  const preset: Preset = {
+    name: state.preset || 'Untitled',
+    chordSet: state.chordSet,
+    chords: [...state.enabled],
+    params: { ...state.params },
+  }
+  await navigator.clipboard.writeText(JSON.stringify(preset, null, 2))
   button.textContent = 'Copied'
-  window.setTimeout(() => { button.textContent = 'Copy params' }, 1200)
+  window.setTimeout(() => { button.textContent = 'Copy preset' }, 1200)
 })
 
 required<HTMLButtonElement>('#reset').addEventListener('click', () => {
-  Object.assign(params, defaultParams())
-  localStorage.removeItem(STORAGE_KEY)
-  refresh()
-  engine?.setParams(params)
+  applyPreset(BUILT_IN[0])
 })
 
 window.setInterval(() => {

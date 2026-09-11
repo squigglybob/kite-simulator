@@ -71,10 +71,10 @@ export interface MusicParams {
 }
 
 /**
- * The beach preset: warm, slow, dark, and light on the top end so it leaves room for
- * the surf it will eventually sit beside.
+ * The starting point every preset is a patch on: warm, slow, dark, and light on the top
+ * end so it leaves room for the surf it will eventually sit beside.
  */
-export const BEACH: MusicParams = {
+export const BASE: MusicParams = {
   gain: 0.55,
 
   brightness: 1200,
@@ -108,4 +108,4 @@ export const BEACH: MusicParams = {
   sectionSeconds: 75,
 }
 
-export const defaultParams = (): MusicParams => ({ ...BEACH })
+export const defaultParams = (): MusicParams => ({ ...BASE })

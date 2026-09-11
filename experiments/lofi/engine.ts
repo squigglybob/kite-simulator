@@ -17,7 +17,7 @@
 import { mulberry32 } from '../../src/core/rng'
 import { shapeAt, type Shape } from './drift'
 import { createChain, type Chain } from './fx'
-import { nextChord, POOL, voiceBass, voiceBells, voicePad } from './harmony'
+import { chordsOf, nextChord, voiceBass, voiceBells, voicePad, type Chord } from './harmony'
 import type { MusicParams } from './params'
 import { playBass } from './voices/bass'
 import { playBell } from './voices/bell'
@@ -57,13 +57,29 @@ export class MusicEngine {
   /** Called as each chord is queued. The harness prints it; the game ignores it. */
   onChord: ((report: ChordReport) => void) | null = null
 
+  /** The chords currently in play. Never empty — an empty pool has nothing to voice. */
+  private chords: Chord[]
+
   constructor(
     private readonly ctx: AudioContext,
     private readonly destination: AudioNode,
     private params: MusicParams,
     private readonly seed: number,
+    chords: readonly Chord[] = chordsOf('aeolian'),
   ) {
     this.rng = mulberry32(seed)
+    this.chords = [...chords]
+  }
+
+  /**
+   * Swaps the pool mid-flight. The change lands on the next chord rather than the
+   * current one, so the chord already sounding is allowed to finish — switching preset
+   * halfway through a chord would cut it off, which sounds like a fault.
+   */
+  setChords(chords: readonly Chord[]): void {
+    if (chords.length === 0) return
+    this.chords = [...chords]
+    if (this.chordIndex >= this.chords.length) this.chordIndex = 0
   }
 
   start(): void {
@@ -151,7 +167,7 @@ export class MusicEngine {
 
   private planChord(chain: Chain, elapsed: number): void {
     const params = this.params
-    const chord = POOL[this.chordIndex]
+    const chord = this.chords[this.chordIndex]
     const shape = shapeAt(this.cursor, params, this.seed)
     const duration = Math.max(
       3,
@@ -183,6 +199,6 @@ export class MusicEngine {
     }
 
     this.cursor += duration
-    this.chordIndex = nextChord(this.chordIndex, this.rng)
+    this.chordIndex = nextChord(this.chordIndex, this.rng, this.chords.length)
   }
 }

@@ -162,7 +162,7 @@ export interface Config {
     waveHeight: number
     /** Distance between wave crests along the shore, in pixels. */
     waveLength: number
-    /** How fast crests travel, scaled by the live wind. */
+    /** How fast crests travel. Fixed: an ocean swell ignores the local breeze. */
     waveSpeed: number
   }
   audio: {

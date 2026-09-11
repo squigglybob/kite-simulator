@@ -281,7 +281,7 @@ function render(alpha: number, frameTime: number): void {
   // is flying in, gusts and all.
   const seaWind = windAt(v3(0, 1.5, SHORE_DISTANCE), world.time)
   const seaSpeed = Math.hypot(seaWind.x, seaWind.y, seaWind.z)
-  drawWaves(ctx, layout, 0, world.time, seaSpeed)
+  drawWaves(ctx, layout, 0, world.time)
   drawSeaSparkle(ctx, layout, world.time, seaSpeed)
   drawSwayingGrass(ctx, layout, world.time, seaSpeed)
 

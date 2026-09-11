@@ -365,6 +365,38 @@ export function drawGround(
   ctx.drawImage(groundSprite(layout, scrollX), 0, 0)
 }
 
+/** Fraction of a swell cycle spent running up the sand. */
+const SWELL_RUN_UP = 0.44
+/** And held at the top of the run, the beat where the water is neither in nor out. */
+const SWELL_DWELL = 0.07
+
+/**
+ * One cycle of water on a beach, as displacement from fully out (0) to fully up the
+ * sand (1). `cycles` is a phase in whole turns; only its fractional part is used.
+ *
+ * Water does not come and go symmetrically, which is exactly what a sine would have it
+ * do. A wave gathers slowly, rushes, and is stopped hard by the sand — accelerating
+ * over most of the run and shedding all of that speed in the last third of it. Then the
+ * backwash drains at a near-constant rate, taking rather longer to go out than it took
+ * to come in, and the beach is still for a beat at the top of the run while one motion
+ * hands over to the other.
+ *
+ * The run-up is a smoothstep over a phase that has itself been bent late (`t ** 1.7`),
+ * which is what puts the peak speed at around three-quarters of the way up instead of
+ * halfway. The backwash is linear with a quarter of a smoothstep blended in, just
+ * enough to round the corners at either end without reading as an ease.
+ */
+function surge(cycles: number): number {
+  const u = cycles - Math.floor(cycles)
+  if (u < SWELL_RUN_UP) {
+    const t = (u / SWELL_RUN_UP) ** 1.7
+    return t * t * (3 - 2 * t)
+  }
+  if (u < SWELL_RUN_UP + SWELL_DWELL) return 1
+  const r = 1 - (u - SWELL_RUN_UP - SWELL_DWELL) / (1 - SWELL_RUN_UP - SWELL_DWELL)
+  return r * 0.75 + r * r * (3 - 2 * r) * 0.25
+}
+
 /**
  * Swell rolling up the beach.
  *
@@ -382,9 +414,18 @@ export function drawGround(
  * something water does.
  *
  * And it is the sum of two wave trains at incommensurate wavelengths and speeds, with
- * a slight slant across the shore so crests are not dead straight. A single sine is
+ * a slight slant across the shore so crests are not dead straight. A single train is
  * perfectly periodic in both space and time and the eye picks it out immediately as a
  * moving graph rather than as sea.
+ *
+ * The shape of each cycle is `surge`, not a sine. A sine spends as long going out as
+ * coming in, which is the one thing water on a beach never does.
+ *
+ * The swell keeps its own time. It is ocean-sized, built far offshore over hours, and
+ * the local breeze does nothing to it — so the phase advances at a fixed rate and the
+ * beat stays steady. Scaling the rate by the gusting wind would also have made the
+ * motion lurch, since the phase here is `time * speed` rather than an integral: a
+ * change in `speed` rewrites the whole history, not just what happens next.
  *
  * The displacement is only ever downward. Letting it go up would lift sea pixels over
  * the horizon into the sky; pushing down reads as surf running up the sand, and any
@@ -395,7 +436,6 @@ export function drawWaves(
   layout: GroundLayout,
   scrollX: number,
   time: number,
-  windSpeed: number,
 ): void {
   const s = config.scenery
   const band = layout.height - layout.horizonY
@@ -409,13 +449,15 @@ export function drawWaves(
   })
 
   // Split into depth zones. The swell moves through these, from the horizon inward.
+  // Everything below counts phase in whole cycles rather than radians, because `surge`
+  // is defined over a cycle; the speed slider keeps its old meaning through the 2π.
   const zones = Math.min(5, rows)
   const zoneRows = rows / zones
-  const speed = s.waveSpeed * (0.4 + Math.min(windSpeed / 10, 1.4))
+  const rate = s.waveSpeed / (Math.PI * 2)
   // Shoreward wavelength, expressed as how much phase is crossed over the whole band.
-  const perZone = (Math.PI * 2 * rows) / Math.max(8, s.waveLength) / zones
-  const slantA = (Math.PI * 2) / Math.max(60, s.waveLength * 3.1)
-  const slantB = (Math.PI * 2) / Math.max(60, s.waveLength * 1.7)
+  const perZone = rows / Math.max(8, s.waveLength) / zones
+  const slantA = 1 / Math.max(60, s.waveLength * 3.1)
+  const slantB = 1 / Math.max(60, s.waveLength * 1.7)
   const slice = 16
 
   for (let zone = 0; zone < zones; zone++) {
@@ -427,9 +469,9 @@ export function drawWaves(
       const width = Math.min(slice, layout.width - x)
       // Two trains, deliberately not harmonics of each other, each slanting slightly
       // differently across the shore.
-      const a = Math.sin(depth - time * speed + x * slantA)
-      const b = Math.sin(depth * 0.63 - time * speed * 1.47 + x * slantB + 2.2)
-      const lift = (a * 0.62 + b * 0.38) * 0.5 + 0.5
+      const a = surge(depth - time * rate + x * slantA)
+      const b = surge(depth * 0.63 - time * rate * 1.47 + x * slantB + 0.35)
+      const lift = a * 0.74 + b * 0.26
       const dy = Math.round(lift * s.waveHeight)
       if (dy === 0) continue
       ctx.drawImage(

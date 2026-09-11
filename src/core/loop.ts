@@ -13,6 +13,8 @@ export interface LoopHandlers {
 
 export interface Loop {
   stop(): void
+  /** Freezes the simulation but keeps drawing, so a menu has a scene behind it. */
+  setPaused(paused: boolean): void
 }
 
 /** Ceiling on catch-up work after a stall (tab backgrounded, breakpoint hit). */
@@ -24,6 +26,7 @@ export function startLoop(handlers: LoopHandlers, hz = 240): Loop {
   let accumulator = 0
   let raf = 0
   let running = true
+  let paused = false
 
   const frame = (now: number) => {
     if (!running) return
@@ -31,6 +34,15 @@ export function startLoop(handlers: LoopHandlers, hz = 240): Loop {
 
     const frameSeconds = Math.min((now - previous) / 1000, MAX_FRAME_SECONDS)
     previous = now
+
+    // Paused still renders, so the settings menu has the frozen beach behind it, but
+    // no time may accrue: an accumulator left filling up while the menu was open would
+    // fast-forward every one of those seconds the instant play resumed.
+    if (paused) {
+      handlers.render(accumulator / dt, frameSeconds)
+      return
+    }
+
     accumulator += frameSeconds
 
     while (accumulator >= dt) {
@@ -47,6 +59,9 @@ export function startLoop(handlers: LoopHandlers, hz = 240): Loop {
     stop() {
       running = false
       cancelAnimationFrame(raf)
+    },
+    setPaused(next) {
+      paused = next
     },
   }
 }

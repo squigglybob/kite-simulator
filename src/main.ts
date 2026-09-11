@@ -27,14 +27,18 @@ import { World } from './sim/world'
 import { drawHud } from './ui/hud'
 import { drawWindWindow } from './ui/windwindow'
 import { createTuningPanel, loadSavedConfig, saveConfig } from './ui/tuning'
+import { createSettingsMenu } from './ui/settings'
 import { drawForceVectors } from './ui/vectors'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#screen')
 if (!canvas) throw new Error('#screen canvas is missing from the document')
+// The stage, not the frame wrapping the canvas: the frame shrink-wraps the picture, so
+// measuring it to choose the scale would just measure the canvas back.
+const stage = document.querySelector<HTMLElement>('#stage') ?? undefined
 
 loadSavedConfig()
 
-const screen = new Screen(canvas)
+const screen = new Screen(canvas, stage)
 const ctx = screen.ctx
 const camera = new Camera()
 const world = new World()
@@ -93,6 +97,7 @@ const audio = ((): { apply: () => void; toggleMasterMute: () => void } | null =>
         // Mute is a decision, not a transient, so it outlives the reload.
         saveConfig()
         panel.refresh()
+        settings.refresh()
       },
     }
   } catch {
@@ -118,8 +123,25 @@ const panel = createTuningPanel({
   },
   onSetUpForLaunch: setUpForLaunch,
   onChange: (path) => {
-    if (path.startsWith('audio.')) audio?.apply()
+    if (path.startsWith('audio.')) {
+      audio?.apply()
+      settings.refresh()
+    }
   },
+})
+
+/**
+ * The player-facing menu. Pausing is the loop's job, not the world's: freezing the
+ * simulation rather than the clock means nothing integrates while the menu is open and
+ * the beach stays on screen underneath it.
+ */
+const settings = createSettingsMenu({
+  onAudioChange: () => {
+    audio?.apply()
+    panel.refresh()
+  },
+  onPauseChange: (paused) => loop.setPaused(paused),
+  onSave: saveConfig,
 })
 let showVectors = false
 let showDebug = true
@@ -139,6 +161,7 @@ input.onPress('KeyM', () => audio?.toggleMasterMute())
 input.onPress('KeyH', () => (showDebug = !showDebug))
 input.onPress('KeyW', () => (showWindow = !showWindow))
 input.onPress('Space', setUpForLaunch)
+input.onPress('Escape', () => settings.toggle())
 
 /** World-space distance to the waterline. Fixes where sea meets sand on screen. */
 const SHORE_DISTANCE = 45
@@ -316,7 +339,7 @@ function clamp(n: number, lo: number, hi: number): number {
   return n < lo ? lo : n > hi ? hi : n
 }
 
-startLoop({ step, render })
+const loop = startLoop({ step, render })
 
 // A hot reload re-runs this module in place, which would leave the previous game loop
 // running alongside the new one and step the simulation twice per frame. Reload fully.

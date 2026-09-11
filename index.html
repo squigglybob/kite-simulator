@@ -22,6 +22,15 @@
         min-width: 0;
         display: grid;
         place-items: center;
+        /* The pause button and settings overlay position against this, so they cover
+           the game without ever covering the tuning panel beside it. */
+        position: relative;
+      }
+      /* Shrink-wraps the canvas so in-game chrome can sit in the picture's own
+         corners rather than stranded out in the letterbox. */
+      #frame {
+        position: relative;
+        line-height: 0;
       }
       canvas {
         display: block;
@@ -31,7 +40,7 @@
     </style>
   </head>
   <body>
-    <div id="stage"><canvas id="screen"></canvas></div>
+    <div id="stage"><div id="frame"><canvas id="screen"></canvas></div></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

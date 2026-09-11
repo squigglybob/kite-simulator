@@ -70,6 +70,19 @@ export interface Config {
     aeroDamping: number
     /** A trace of always-on damping, so a kite turning in dead air eventually stops. */
     spinDamping: number
+    /**
+     * Sideslip response — what happens when the air runs across the span instead of
+     * down the spine. `sideslipLift` is the fraction of its lift a kite dragged
+     * broadside gives up, `sideslipDrag` the extra drag coefficient it picks up.
+     *
+     * This is the pair that ties heading to travel. A flat plate makes exactly the
+     * same lift whichever way round it is within its own plane, so nothing connects
+     * where the kite points to where it goes and it crabs; a real kite's sail luffs
+     * the moment it is slid sideways, so the only heading that works is the one it is
+     * facing. Set `sideslipLift` to zero to get the old direction-blind plate back.
+     */
+    sideslipLift: number
+    sideslipDrag: number
     /** Angle of attack at which lift collapses, degrees. */
     stallDeg: number
     /** Degrees over which the stall blends in. */
@@ -208,6 +221,8 @@ export const config: Config = {
     tailMassPerMetre: 0.04,
     aeroDamping: 0.35,
     spinDamping: 0.03,
+    sideslipLift: 0.9,
+    sideslipDrag: 0.7,
     stallDeg: 16,
     stallBlendDeg: 9,
     clScale: 1,

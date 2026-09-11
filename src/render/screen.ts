@@ -18,11 +18,17 @@ export class Screen {
   private readonly stage: HTMLElement
   private scale = 1
 
-  constructor(display: HTMLCanvasElement) {
+  /**
+   * `container` is the element whose free space decides the scale. It must be an
+   * ancestor that is sized *independently of the canvas* — the stage, not a wrapper
+   * that shrink-wraps the picture. Measuring a shrink-wrapping parent means measuring
+   * the canvas to size the canvas, and the scale collapses to 1 and stays there.
+   */
+  constructor(display: HTMLCanvasElement, container?: HTMLElement) {
     this.display = display
     // Measured against the containing element, not the window, so the canvas
     // shrinks to fit beside the tuning panel instead of hiding behind it.
-    this.stage = display.parentElement ?? document.body
+    this.stage = container ?? display.parentElement ?? document.body
 
     const displayCtx = display.getContext('2d', { alpha: false })
     if (!displayCtx) throw new Error('2D context unavailable on the display canvas')

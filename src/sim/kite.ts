@@ -1,6 +1,12 @@
 import { config } from './config'
 import { bridleGeometry } from './bridle'
-import { dragCoefficient, dynamicPressure, liftCoefficient } from './aero'
+import {
+  dragCoefficient,
+  dynamicPressure,
+  liftCoefficient,
+  sideslipDragCoefficient,
+  sideslipLiftFactor,
+} from './aero'
 import { solveLine, type LineState } from './line'
 import { lateralGustGradient, windAt } from './wind'
 import {
@@ -57,6 +63,8 @@ export interface KiteDiagnostics {
   airspeed: number
   /** Angle of attack, radians. Measured from the orientation, no longer a state. */
   alpha: number
+  /** Sideslip: 1 when the air runs down the spine, 0 when it runs across the span. */
+  alignment: number
   lift: Vec3
   drag: Vec3
   tensionForce: Vec3
@@ -94,6 +102,7 @@ export class Kite {
     windDir: v3(0, 0, 1),
     airspeed: 0,
     alpha: 0,
+    alignment: 1,
     lift: v3(),
     drag: v3(),
     tensionForce: v3(),
@@ -212,6 +221,8 @@ export class Kite {
     let alpha = 0
     let lift = v3()
     let drag = v3()
+    /** Cosine of the sideslip angle. 1 is flying straight down its own spine. */
+    let alignment = 1
 
     if (airspeed > 0.05) {
       windDir = scale(apparent, 1 / airspeed)
@@ -219,19 +230,37 @@ export class Kite {
       // positive component along it at positive incidence.
       alpha = Math.asin(Math.max(-1, Math.min(1, dot(windDir, this.normal))))
 
-      // Lift acts square to the airflow, on the side the leeward face looks toward.
+      // How much of the air is running down the spine rather than across the span.
+      // Kept as squares rather than an angle: it needs no sign, and it needs no
+      // normalising of an in-plane flow vector that vanishes when the air comes
+      // square to the sail — where, rightly, there is no sideslip to speak of, since
+      // a barn door is a barn door whichever way round you hold it.
+      const chordwise = dot(apparent, this.nose)
+      const spanwise = dot(apparent, this.span)
+      const inPlaneSq = chordwise * chordwise + spanwise * spanwise
+      alignment =
+        inPlaneSq > 1e-6 ? Math.sqrt((chordwise * chordwise) / inPlaneSq) : 1
+
+      // Lift acts square to the airflow, on the side the leeward face looks toward,
+      // and only to the extent the kite is pointing where the air is coming from.
       const perpendicular = sub(this.normal, scale(windDir, dot(this.normal, windDir)))
       const perpLength = length(perpendicular)
       if (perpLength > 1e-4) {
         lift = scale(
           perpendicular,
-          (q * liftCoefficient(alpha) * k.clScale) / perpLength,
+          (q * liftCoefficient(alpha) * k.clScale * sideslipLiftFactor(alignment)) /
+            perpLength,
         )
       }
 
       const lineDragArea = config.line.length * config.line.dragPerMetre
       const lineDrag = 0.5 * config.env.airDensity * airspeed * airspeed * lineDragArea
-      drag = scale(windDir, q * dragCoefficient(alpha) * k.cdScale + lineDrag)
+      drag = scale(
+        windDir,
+        q *
+          (dragCoefficient(alpha) * k.cdScale + sideslipDragCoefficient(alignment)) +
+          lineDrag,
+      )
     }
 
     const aero = add(lift, drag)
@@ -397,6 +426,7 @@ export class Kite {
     d.windDir = windDir
     d.airspeed = airspeed
     d.alpha = alpha
+    d.alignment = alignment
     d.lift = lift
     d.drag = drag
     d.tensionForce = tensionForce

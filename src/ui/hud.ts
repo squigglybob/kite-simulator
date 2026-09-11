@@ -82,6 +82,10 @@ export function drawHud(
     22,
     stats.crashes > 0 ? C.kiteTrim : C.hudText,
   )
+  // Mute survives a reload, which it should — but that makes a silent game on startup
+  // indistinguishable from a broken one, and the checkbox that would have explained it
+  // sits in a panel nobody has opened. So it says so on screen.
+  if (config.audio.masterMuted) shadowed(ctx, 'MUTE  (M)', width - 4, 31, C.kite)
   ctx.textAlign = 'left'
 
   // --- Engineering readout ----------------------------------------------------
@@ -90,6 +94,7 @@ export function drawHud(
       `elev  ${(d.elevation * DEG).toFixed(0)}`,
       `azim  ${(d.azimuth * DEG).toFixed(0)}`,
       `aoa   ${(d.alpha * DEG).toFixed(1)}${d.stalled ? ' STALL' : ''}`,
+      `slip  ${(Math.acos(Math.min(1, Math.max(0, d.alignment))) * DEG).toFixed(0)}`,
       `air   ${d.airspeed.toFixed(1)}`,
       `roll  ${(d.roll * DEG).toFixed(0)}`,
       `${state.fps}fps x${state.zoom}`,

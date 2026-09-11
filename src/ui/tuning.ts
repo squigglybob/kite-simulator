@@ -1,4 +1,5 @@
 import { config, type Config } from '../sim/config'
+import { availableMusicSources } from './settings'
 
 /**
  * Live tuning panel.
@@ -13,6 +14,13 @@ import { config, type Config } from '../sim/config'
  */
 
 const STORAGE_KEY = 'kite-flyer.config'
+
+/**
+ * The shipped values, captured before `loadSavedConfig` can merge anything over them.
+ * A saved value that turns out to be unusable falls back to this rather than to
+ * whichever option happens to be listed first.
+ */
+const DEFAULTS = structuredClone(config) as unknown as Nested
 
 interface SliderSpec {
   path: string
@@ -74,6 +82,8 @@ const SECTIONS: Section[] = [
       { path: 'kite.tailMassPerMetre', label: 'tail kg per m', min: 0, max: 0.08, step: 0.001 },
       { path: 'kite.aeroDamping', label: 'plate damping', min: 0, max: 2, step: 0.01 },
       { path: 'kite.spinDamping', label: 'spin damping', min: 0, max: 0.5, step: 0.005 },
+      { path: 'kite.sideslipLift', label: 'sideslip lift loss', min: 0, max: 1, step: 0.02 },
+      { path: 'kite.sideslipDrag', label: 'sideslip drag', min: 0, max: 2.5, step: 0.05 },
       { path: 'kite.stallDeg', label: 'stall angle deg', min: 5, max: 40, step: 0.5 },
       { path: 'kite.stallBlendDeg', label: 'stall blend deg', min: 1, max: 25, step: 0.5 },
       { path: 'kite.clScale', label: 'lift scale', min: 0, max: 3, step: 0.05 },
@@ -128,12 +138,11 @@ const SECTIONS: Section[] = [
       { path: 'audio.ambienceVolume', label: 'sea volume', min: 0, max: 1, step: 0.02 },
       { path: 'audio.ambienceMuted', label: 'mute sea' },
       {
+        // Only the sources that actually work, so `validateSelects` treats a saved
+        // value for one that does not yet exist as unusable and falls back.
         path: 'audio.musicSource',
         label: 'music',
-        options: [
-          { value: 'off', label: 'none' },
-          { value: 'tracks', label: 'recorded tracks' },
-        ],
+        options: availableMusicSources().map((s) => ({ value: s.value, label: s.label })),
       },
       { path: 'audio.musicVolume', label: 'music volume', min: 0, max: 1, step: 0.02 },
       { path: 'audio.musicMuted', label: 'mute music' },
@@ -203,7 +212,12 @@ function validateSelects(): void {
       if (!isSelect(row)) continue
       const current = readPath(root, row.path)
       if (!row.options.some((option) => option.value === current)) {
-        writePath(root, row.path, row.options[0].value)
+        const fallback = readPath(DEFAULTS, row.path)
+        writePath(
+          root,
+          row.path,
+          typeof fallback === 'string' ? fallback : row.options[0].value,
+        )
       }
     }
   }

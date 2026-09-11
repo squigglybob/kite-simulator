@@ -1,0 +1,18 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+const send = (t) => { new Image().src = 'http://localhost:5200/?r=' + encodeURIComponent(t) }
+window.onerror = (m) => send('SMOKE onerror: ' + m)
+send('SMOKE page loaded')
+try {
+  const { MusicEngine } = await import('./engine.ts')
+  const { defaultParams } = await import('./params.ts')
+  send('SMOKE modules imported')
+  const ctx = new AudioContext()
+  send('SMOKE ctx state=' + ctx.state)
+  await ctx.resume()
+  send('SMOKE resumed state=' + ctx.state)
+  const e = new MusicEngine(ctx, ctx.destination, defaultParams(), 1)
+  e.start()
+  send('SMOKE engine started')
+  setTimeout(() => send('SMOKE timer fired, ctx.currentTime=' + ctx.currentTime.toFixed(2)), 5000)
+} catch (err) { send('SMOKE THREW: ' + (err && err.stack || err)) }
+</script></body></html>

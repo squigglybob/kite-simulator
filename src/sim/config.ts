@@ -84,22 +84,33 @@ export interface KiteParams {
    */
   dihedralDeg: number
   /**
-   * The keel: the vertical fin a delta hangs under its sail, as an area in square
-   * metres, a position along the spine and how far it drops off the windward face
-   * (both in spine-lengths).
+   * The keel: the fin a delta hangs under its sail, given as an outline rather than
+   * as an area, because on a delta the keel *is* the bridle. There is no left and
+   * right leg — the flying line ties onto a single point on the keel, and sliding
+   * that point along it is the kite's only trim adjustment.
    *
-   * This is how a tailless kite knows which way is up. The fin is a flat plate facing
-   * sideways, so it does nothing in straight flight and bites hard the moment the kite
-   * slews across the airflow; sitting behind and below the tow point, that bite swings
-   * the nose back into the wind. A diamond does the same job with a tail and carries
-   * no keel, which is why `keelArea` is zero for it.
+   * `keelFore` and `keelAft` are where it meets the spine and `keelApex` where its
+   * lowest corner sits, all in spine-lengths from the centre of area and positive
+   * toward the nose; `keelDrop` is how far that corner hangs below the sail. The apex
+   * goes well forward, so the leading edge is short and the trailing edge long — half
+   * a kite shape, which is what a real delta keel looks like. `keelTow` is where on
+   * that long trailing edge the line attaches, 0 at the apex and 1 back at the spine.
    *
-   * A stunt kite deliberately runs a small keel. Too much and it insists on pointing
-   * into the wind, which is exactly what you do not want from a kite you are steering.
+   * Area and the point the keel's drag acts through are read off these, so the drawn
+   * keel and the simulated one cannot drift apart. A diamond has no keel — it uses a
+   * tail and a three-leg bridle instead — and sets `keelDrop` to zero.
+   *
+   * The keel is how a tailless kite knows which way is up. It is edge-on in straight
+   * flight and costs nothing; slew across the airflow and it meets the air face-on,
+   * and sitting behind the centre of mass that bite swings the nose back into wind. A
+   * stunt kite deliberately runs a small one — too much and the kite insists on
+   * pointing into the wind, which is the opposite of steerable.
    */
-  keelArea: number
-  keelAlong: number
+  keelFore: number
+  keelAft: number
+  keelApex: number
   keelDrop: number
+  keelTow: number
   /** Angle of attack at which lift collapses, degrees. */
   stallDeg: number
   /** Degrees over which the stall blends in. */
@@ -279,9 +290,11 @@ export const config: Config = {
       aspect: 1.5,
       tailLength: 3.5,
       dihedralDeg: 6,
-      keelArea: 0,
-      keelAlong: -0.1,
-      keelDrop: 0.16,
+      keelFore: 0,
+      keelAft: 0,
+      keelApex: 0,
+      keelDrop: 0,
+      keelTow: 0.3,
     },
     delta: {
       mass: 0.3,
@@ -303,9 +316,11 @@ export const config: Config = {
       sideslipLift: 0.9,
       sideslipDrag: 0.7,
       dihedralDeg: 20,
-      keelArea: 0.1,
-      keelAlong: -0.12,
-      keelDrop: 0.2,
+      keelFore: 0.3,
+      keelAft: -0.3,
+      keelApex: 0.1,
+      keelDrop: 0.38,
+      keelTow: 0.2,
       stallDeg: 18,
       stallBlendDeg: 9,
       clScale: 1,

@@ -1,5 +1,6 @@
 import { config } from './config'
 import { bridleGeometry } from './bridle'
+import { hasKeel, keelGeometry } from './keel'
 import {
   dragCoefficient,
   dynamicPressure,
@@ -345,11 +346,13 @@ export class Kite {
     // slews across the flow it meets the air face-on, and because it is behind the
     // centre of mass that force swings the nose back into the wind. It is what holds a
     // tailless kite straight, and it is the reason a delta needs no tail.
-    if (k.keelArea > 0) {
+    if (hasKeel()) {
+      const keel = keelGeometry()
+      const keelArea = keel.area * size.spine * size.spine
       const keelAt = add(
-        scale(this.nose, k.keelAlong * size.spine),
+        scale(this.nose, keel.centreAlong * size.spine),
         // Hangs off the windward face, which is the side away from the normal.
-        scale(this.normal, -k.keelDrop * size.spine),
+        scale(this.normal, -keel.centreDrop * size.spine),
       )
       const keelFlow = sub(
         windAt(add(this.pos, keelAt), time),
@@ -363,7 +366,7 @@ export class Kite {
         const keelAlpha = Math.asin(
           Math.max(-1, Math.min(1, dot(keelDir, this.span))),
         )
-        const keelQ = dynamicPressure(keelSpeed, k.keelArea)
+        const keelQ = dynamicPressure(keelSpeed, keelArea)
         const keelForce = scale(keelDir, keelQ * dragCoefficient(keelAlpha))
         const perp = sub(this.span, scale(keelDir, dot(this.span, keelDir)))
         const perpLen = length(perp)

@@ -1,5 +1,6 @@
 import { config } from '../../sim/config'
 import { bridleGeometry } from '../../sim/bridle'
+import { hasKeel, keelGeometry } from '../../sim/keel'
 import { LOWER_BRIDLE, NOSE, SPAR, TAIL } from '../../sim/shape'
 import type { Kite } from '../../sim/kite'
 import {
@@ -253,6 +254,12 @@ export class KiteRenderer {
    * The keel: the fin a delta hangs under its sail. Drawn on the windward side, which
    * is the face away from the normal, so it reads as standing out toward the flyer.
    */
+  /**
+   * The keel, drawn from the same outline the physics uses: half a kite shape with a
+   * short leading edge and a long trailing one, on the windward side of the sail so
+   * it reads as standing out toward the flyer. The tow point is marked, because on a
+   * delta that single point is the whole bridle.
+   */
   private drawKeel(
     ctx: CanvasRenderingContext2D,
     camera: Camera,
@@ -262,16 +269,17 @@ export class KiteRenderer {
     facingAway: boolean,
     spanPx: number,
   ): void {
-    const k = config.kite
-    if (k.keelArea <= 0 || spanPx < 9) return
-    const drop = k.keelDrop * size.spine
-    const front = add(centre, scale(frame.nose, k.keelAlong * size.spine + size.spine * 0.3))
-    const back = add(centre, scale(frame.nose, k.keelAlong * size.spine - size.spine * 0.25))
-    const tip = add(
-      add(centre, scale(frame.nose, k.keelAlong * size.spine)),
-      scale(frame.normal, -drop),
-    )
-    const poly = [camera.project(front), camera.project(tip), camera.project(back)]
+    if (!hasKeel() || spanPx < 9) return
+    const keel = keelGeometry()
+    // The keel lies in the plane of the spine and the sail's face, standing off the
+    // windward side — which is the side away from the normal.
+    const corner = ([along, drop]: [number, number]): Vec3 =>
+      add(
+        add(centre, scale(frame.nose, along * size.spine)),
+        scale(frame.normal, -drop * size.spine),
+      )
+
+    const poly = [keel.fore, keel.apex, keel.aft].map((c) => camera.project(corner(c)))
     fillPolygon(ctx, poly, facingAway ? C.kiteTrimShade : C.kiteTrim)
     if (spanPx > 14) pixelPath(ctx, [...poly, poly[0]], C.ink)
   }
@@ -291,6 +299,11 @@ export class KiteRenderer {
     kite: Kite,
     centre: Vec3,
   ): void {
+    // A keeled kite has no bridle to draw: the flying line ties straight onto the
+    // keel, and `bridlePoint` already ends it there. A delta has no left and right
+    // leg at all — that single keel attachment is the whole of its bridle.
+    if (hasKeel()) return
+
     const view = viewTo(centre)
     const frame = kiteFrame(kite, view)
     const size = dimensions()

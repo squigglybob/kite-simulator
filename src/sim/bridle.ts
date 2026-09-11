@@ -1,4 +1,5 @@
 import { config } from './config'
+import { hasKeel, keelGeometry } from './keel'
 import { LOWER_BRIDLE, SPAR } from './shape'
 
 /**
@@ -31,6 +32,21 @@ export interface BridleGeometry {
  * makes. The standoff does not affect it, only how far the bridle stands proud.
  */
 export function bridleGeometry(): BridleGeometry {
+  // A kite with a keel has no bridle to solve: the line ties straight onto the keel,
+  // and that point is the tow point.
+  if (hasKeel()) {
+    const keel = keelGeometry()
+    const radius = Math.hypot(keel.towAlong, keel.towDrop)
+    return {
+      along: keel.towAlong,
+      standoff: keel.towDrop,
+      angle:
+        radius > 1e-6
+          ? Math.acos(Math.max(-1, Math.min(1, -keel.towAlong / radius)))
+          : Math.PI / 2,
+    }
+  }
+
   const upper = config.kite.bridleUpper
   const lower = config.kite.bridleLower
   const along =

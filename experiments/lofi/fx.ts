@@ -50,6 +50,8 @@ export interface Chain {
   setReverb(amount: number): void
   /** The pad's lowpass corner. One filter on the bus, not one per note. */
   setPadCutoff(hz: number): void
+  /** The drift's swell on the pad, 0 to 1, multiplied with the pad fader. */
+  setPadSwell(level: number): void
   setHiss(level: number): void
   setWow(depth: number, rate: number): void
   /** Regenerates the impulse response. Cheap, but not free — debounce a slider. */
@@ -183,8 +185,16 @@ export function createChain(
   padFilter.type = 'lowpass'
   padFilter.frequency.value = params.brightness
   padFilter.Q.value = 0.6
+
+  // The swell is a separate node from the bus so that the fader and the drift do not
+  // fight over one gain. It also wants a far slower glide: the fader should feel
+  // immediate, whereas the swell is meant to be something you never catch happening.
+  const padSwell = ctx.createGain()
+  padSwell.gain.value = 1
+
   pad.bus.disconnect()
-  pad.bus.connect(padFilter)
+  pad.bus.connect(padSwell)
+  padSwell.connect(padFilter)
   padFilter.connect(dry)
   padFilter.connect(pad.send)
 
@@ -246,7 +256,10 @@ export function createChain(
       glide(bell.send.gain, Math.min(1, amount * BELL_SEND_SHARE))
     },
     setPadCutoff(hz) {
-      glide(padFilter.frequency, Math.max(60, hz))
+      padFilter.frequency.setTargetAtTime(Math.max(60, hz), ctx.currentTime, 1.5)
+    },
+    setPadSwell(level) {
+      padSwell.gain.setTargetAtTime(Math.max(0, level), ctx.currentTime, 2.5)
     },
     setHiss(level) {
       glide(hissGain.gain, level * 0.12)

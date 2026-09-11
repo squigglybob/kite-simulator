@@ -24,6 +24,12 @@ import type { MusicParams } from './params'
 export interface Shape {
   /** Pad filter corner in Hz, already drifted. */
   cutoff: number
+  /**
+   * Pad level, 0 to 1. Never zero: the chords are the one thing always present, so this
+   * swells and fades rather than dropping out. Applied continuously on the pad's bus
+   * rather than per note, so it glides instead of stepping at each chord.
+   */
+  pad: number
   /** Reverb send, 0 to 1, already drifted. */
   reverb: number
   /** Octave offset for the pad. The voicing rounds it. */
@@ -31,7 +37,6 @@ export interface Shape {
   /** Multiplier on the configured density. */
   density: number
   /** Voice multipliers. Zero means the voice has dropped out of this section. */
-  pad: number
   bass: number
   bells: number
   /** What the section is doing, for the console readout. */
@@ -46,12 +51,14 @@ const CUTOFF_PERIOD = 97
 const REVERB_PERIOD = 131
 const REGISTER_PERIOD = 149
 const DENSITY_PERIOD = 71
+const SWELL_PERIOD = 113
 
 /** Separate seed offsets, or all four walks would be the same curve. */
 const CUTOFF_SEED = 0
 const REVERB_SEED = 2311
 const REGISTER_SEED = 5417
 const DENSITY_SEED = 7919
+const SWELL_SEED = 3767
 const SECTION_SEED = 104729
 const VARIANT_SEED = 15485863
 
@@ -63,18 +70,23 @@ interface Variant {
   weight: number
   /**
    * Seconds of the section this lasts before everything returns. Infinity means it
-   * holds for the whole section. A full rest is capped because seventy-five seconds of
-   * literal silence in a game reads as broken audio rather than as a musical choice.
+   * holds for the whole section.
    */
   holdFor: number
 }
 
+/**
+ * No variant takes the pad below `hushed`, and none removes it. The chords carry the
+ * identity of the piece: an arrangement that drops the bass or the bells still sounds
+ * like the same music thinned out, whereas one that drops the chords sounds like a
+ * different piece, or like a fault. `hushed` is what remains of the full rest — the pad
+ * recedes far enough to let everything around it come forward, without going away.
+ */
 const VARIANTS: Variant[] = [
   { name: 'no bass', pad: 1, bass: 0, bells: 1, weight: 3, holdFor: Infinity },
   { name: 'no bells', pad: 1, bass: 1, bells: 0, weight: 3, holdFor: Infinity },
   { name: 'pad alone', pad: 1, bass: 0, bells: 0, weight: 3, holdFor: Infinity },
-  { name: 'bass alone', pad: 0, bass: 1, bells: 0.4, weight: 2, holdFor: Infinity },
-  { name: 'rest', pad: 0, bass: 0, bells: 0, weight: 1, holdFor: 25 },
+  { name: 'hushed', pad: 0.4, bass: 0.35, bells: 0, weight: 2, holdFor: 40 },
 ]
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
@@ -102,6 +114,7 @@ export function shapeAt(t: number, params: MusicParams, seed: number): Shape {
   const reverb = fbm1D(t / REVERB_PERIOD, 3, seed + REVERB_SEED)
   const register = fbm1D(t / REGISTER_PERIOD, 2, seed + REGISTER_SEED)
   const density = fbm1D(t / DENSITY_PERIOD, 3, seed + DENSITY_SEED)
+  const swell = fbm1D(t / SWELL_PERIOD, 3, seed + SWELL_SEED)
 
   const sectionSeconds = Math.max(10, params.sectionSeconds)
   const index = Math.floor(t / sectionSeconds)
@@ -125,7 +138,7 @@ export function shapeAt(t: number, params: MusicParams, seed: number): Shape {
     reverb: Math.min(1, params.reverbMix * lerp(0.7, 1.35, reverb)),
     register: register * 2 - 1,
     density: lerp(0.6, 1.15, density),
-    pad: dropped ? variant.pad : 1,
+    pad: (1 - params.swellDepth * (1 - swell)) * (dropped ? variant.pad : 1),
     bass: dropped ? variant.bass : 1,
     bells: dropped ? variant.bells : 1,
     section: dropped ? name : 'full',

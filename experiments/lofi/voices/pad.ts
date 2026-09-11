@@ -8,7 +8,6 @@
  */
 
 import type { Chain } from '../fx'
-import type { Shape } from '../drift'
 import { midiToFreq, type NoteEvent } from '../harmony'
 import type { MusicParams } from '../params'
 
@@ -22,7 +21,6 @@ export function playPad(
   event: NoteEvent,
   chain: Chain,
   params: MusicParams,
-  shape: Shape,
   startAt: number,
 ): void {
   const at = startAt + event.at
@@ -33,8 +31,8 @@ export function playPad(
 
   const envelope = ctx.createGain()
   envelope.gain.setValueAtTime(0, at)
-  envelope.gain.linearRampToValueAtTime(event.level * shape.pad, at + attack)
-  envelope.gain.setValueAtTime(event.level * shape.pad, end)
+  envelope.gain.linearRampToValueAtTime(event.level, at + attack)
+  envelope.gain.setValueAtTime(event.level, end)
   envelope.gain.linearRampToValueAtTime(0, end + release)
 
   const panner = ctx.createStereoPanner()

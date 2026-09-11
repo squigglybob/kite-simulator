@@ -129,7 +129,21 @@ export class MusicEngine {
     const chain = this.chain
     if (!chain || !this.running) return
 
-    const elapsed = this.ctx.currentTime - this.origin
+    const elapsed = Math.max(0, this.ctx.currentTime - this.origin)
+
+    // The continuous half of the drift is applied every pump, not every chord. A swell
+    // that only moved when the harmony did would not be a swell, it would be a series
+    // of level changes you could count. The discontinuous half — which voices play at
+    // all — stays chord-aligned, down in planChord, because a voice vanishing mid-chord
+    // sounds like a fault rather than an arrangement.
+    const now = shapeAt(elapsed, this.params, this.seed)
+    this.reverbDrift = this.params.reverbMix > 0 ? now.reverb / this.params.reverbMix : 1
+    this.cutoffDrift = this.params.brightness > 0 ? now.cutoff / this.params.brightness : 1
+    chain.setVoiceGains(this.params)
+    chain.setPadSwell(now.pad)
+    chain.setPadCutoff(now.cutoff)
+    chain.setReverb(now.reverb)
+
     while (this.cursor < elapsed + LOOKAHEAD) this.planChord(chain, elapsed)
   }
 
@@ -137,11 +151,6 @@ export class MusicEngine {
     const params = this.params
     const chord = POOL[this.chordIndex]
     const shape = shapeAt(this.cursor, params, this.seed)
-    this.reverbDrift = params.reverbMix > 0 ? shape.reverb / params.reverbMix : 1
-    this.cutoffDrift = params.brightness > 0 ? shape.cutoff / params.brightness : 1
-    chain.setVoiceGains(params)
-    chain.setReverb(shape.reverb)
-    chain.setPadCutoff(shape.cutoff)
     const duration = Math.max(
       3,
       params.chordSeconds + (this.rng() * 2 - 1) * params.chordJitter,
@@ -158,7 +167,8 @@ export class MusicEngine {
     const audible = this.cursor + duration > elapsed
 
     if (audible) {
-      if (shape.pad > 0) for (const event of pad) playPad(this.ctx, event, chain, params, shape, startAt)
+      // The pad is never gated. It swells and fades on its bus, but it is always there.
+      for (const event of pad) playPad(this.ctx, event, chain, params, startAt)
       if (shape.bass > 0) playBass(this.ctx, bass, chain, params, shape, startAt)
       if (shape.bells > 0) for (const event of bells) playBell(this.ctx, event, chain, shape, startAt)
 
@@ -166,7 +176,7 @@ export class MusicEngine {
         chord: chord.name,
         section: shape.section,
         seconds: duration,
-        notes: (shape.pad > 0 ? pad.length : 0) + (shape.bass > 0 ? 1 : 0) + (shape.bells > 0 ? bells.length : 0),
+        notes: pad.length + (shape.bass > 0 ? 1 : 0) + (shape.bells > 0 ? bells.length : 0),
       })
     }
 

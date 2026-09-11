@@ -46,6 +46,12 @@ export interface MusicParams {
    * whether the bass is audible at all on the speakers most people actually have.
    */
   bassOctave: number
+  /**
+   * How far the chords swell and fade, 0 to 0.9. At zero the pad holds one level; at
+   * 0.5 it breathes between half volume and full. The chords never drop out whatever
+   * this is set to — they are the one voice always present.
+   */
+  swellDepth: number
 
   /** Roughly how many bell notes sound per minute, before drift and dropouts. */
   bellRate: number
@@ -83,6 +89,7 @@ export const BEACH: MusicParams = {
   bassGain: 0.38,
   bellGain: 0.3,
   bassOctave: 0.5,
+  swellDepth: 0.45,
 
   bellRate: 4,
 

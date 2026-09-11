@@ -17,7 +17,7 @@
 import { mulberry32 } from '../../src/core/rng'
 import { shapeAt, type Shape } from './drift'
 import { createChain, type Chain } from './fx'
-import { chordsOf, nextChord, voiceBass, voiceBells, voicePad, type Chord } from './harmony'
+import { chordsOf, DEFAULT_MOTION, nextChord, voiceBass, voiceBells, voicePad, type Chord } from './harmony'
 import type { MusicParams } from './params'
 import { playBass } from './voices/bass'
 import { playBell } from './voices/bell'
@@ -59,6 +59,8 @@ export class MusicEngine {
 
   /** The chords currently in play. Never empty — an empty pool has nothing to voice. */
   private chords: Chord[]
+  /** How good each kind of root motion is. Indexed by scale degrees risen. */
+  private motion: number[] = [...DEFAULT_MOTION]
 
   constructor(
     private readonly ctx: AudioContext,
@@ -80,6 +82,12 @@ export class MusicEngine {
     if (chords.length === 0) return
     this.chords = [...chords]
     if (this.chordIndex >= this.chords.length) this.chordIndex = 0
+  }
+
+  /** Root-motion weights, as the progression sliders set them. Applies to the next move. */
+  setMotion(motion: readonly number[]): void {
+    if (motion.length === 0) return
+    this.motion = [...motion]
   }
 
   start(): void {
@@ -199,6 +207,6 @@ export class MusicEngine {
     }
 
     this.cursor += duration
-    this.chordIndex = nextChord(this.chordIndex, this.rng, this.chords.length)
+    this.chordIndex = nextChord(this.chordIndex, this.rng, this.chords, this.motion)
   }
 }

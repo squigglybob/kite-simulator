@@ -15,7 +15,8 @@
  */
 
 import { MusicEngine } from './engine'
-import { CHORD_SETS, CHORD_SET_NAMES, chordsOf, type Chord, type ChordSetName } from './harmony'
+import { CHORD_SETS, CHORD_SET_NAMES, chordsOf, DEFAULT_MOTION, MOTION_LABELS,
+  type Chord, type ChordSetName } from './harmony'
 import { defaultParams, type MusicParams } from './params'
 import { BUILT_IN, isBuiltIn, loadSaved, remove, save, type Preset } from './presets'
 
@@ -119,6 +120,8 @@ interface State {
   chordSet: ChordSetName
   /** Indices of the enabled chords. Empty means the whole set. */
   enabled: number[]
+  /** Root-motion weights by scale degrees risen. Index 0 is a repeat and stays zero. */
+  motion: number[]
   params: MusicParams
 }
 
@@ -127,6 +130,7 @@ function initialState(): State {
     preset: BUILT_IN[0].name,
     chordSet: BUILT_IN[0].chordSet,
     enabled: [],
+    motion: [...DEFAULT_MOTION],
     params: defaultParams(),
   }
   try {
@@ -136,6 +140,9 @@ function initialState(): State {
     if (saved.chordSet && saved.chordSet in CHORD_SETS) base.chordSet = saved.chordSet
     if (Array.isArray(saved.enabled)) base.enabled = saved.enabled.filter((n) => typeof n === 'number')
     if (typeof saved.preset === 'string') base.preset = saved.preset
+    if (Array.isArray(saved.motion) && saved.motion.length === 7) {
+      base.motion = saved.motion.map((n) => (typeof n === 'number' && Number.isFinite(n) ? n : 0))
+    }
     // Field by field, so a state saved before a parameter existed still loads with that
     // parameter at its default rather than undefined.
     const params = saved.params as Record<string, unknown> | undefined
@@ -262,13 +269,16 @@ function applyPreset(preset: Preset): void {
   state.preset = preset.name
   state.chordSet = preset.chordSet
   state.enabled = [...preset.chords]
+  state.motion = [...preset.motion]
   state.params = { ...preset.params }
   chordSetSelect.value = state.chordSet
   refreshChordList()
+  refreshMotion()
   refreshFaders()
   refreshPresetList()
   engine?.setParams(state.params)
   engine?.setChords(activeChords())
+  engine?.setMotion(state.motion)
   persist()
 }
 
@@ -311,7 +321,13 @@ saveButton.addEventListener('click', () => {
     window.alert(`"${name}" is a built-in preset. Pick another name.`)
     return
   }
-  save({ name, chordSet: state.chordSet, chords: [...state.enabled], params: { ...state.params } })
+  save({
+    name,
+    chordSet: state.chordSet,
+    chords: [...state.enabled],
+    motion: [...state.motion],
+    params: { ...state.params },
+  })
   state.preset = name
   refreshPresetList()
   persist()
@@ -350,6 +366,55 @@ chordSetSelect.addEventListener('change', () => {
 })
 showFeel()
 panel.append(chordSetSelect, feel, chordList)
+
+heading('Progression')
+const motionNote = document.createElement('p')
+motionNote.className = 'feel'
+motionNote.textContent =
+  'How likely each kind of root motion is. Zero forbids it outright.'
+panel.append(motionNote)
+
+const motionControls: { input: HTMLInputElement; readout: HTMLElement }[] = []
+// Index 0 is a chord following itself, which is never a musical choice, so it has no
+// slider — it is the one weight that stays at zero.
+for (let rise = 1; rise <= 6; rise++) {
+  const label = document.createElement('label')
+  label.className = 'later'
+  const caption = document.createElement('span')
+  const name = document.createElement('i')
+  name.style.fontStyle = 'normal'
+  name.textContent = MOTION_LABELS[rise]
+  const value = document.createElement('b')
+  value.textContent = String(state.motion[rise])
+  caption.append(name, value)
+
+  const input = document.createElement('input')
+  input.type = 'range'
+  input.min = '0'
+  input.max = '8'
+  input.step = '1'
+  input.value = String(state.motion[rise])
+  input.addEventListener('input', () => {
+    state.motion[rise] = Number(input.value)
+    value.textContent = input.value
+    engine?.setMotion(state.motion)
+    markEdited()
+    persist()
+  })
+
+  motionControls[rise] = { input, readout: value }
+  label.append(caption, input)
+  panel.append(label)
+}
+
+function refreshMotion(): void {
+  for (let rise = 1; rise <= 6; rise++) {
+    const control = motionControls[rise]
+    if (!control) continue
+    control.input.value = String(state.motion[rise])
+    control.readout.textContent = String(state.motion[rise])
+  }
+}
 
 for (const group of GROUPS) {
   heading(group.title)
@@ -400,6 +465,7 @@ toggle.addEventListener('click', () => {
   if (!ctx) {
     ctx = new AudioContext()
     engine = new MusicEngine(ctx, ctx.destination, state.params, seed, activeChords())
+    engine.setMotion(state.motion)
     engine.onChord = (report) => {
       chordOut.textContent = `${report.chord}  ${report.seconds.toFixed(1)}s  ${report.notes} notes`
       sectionOut.textContent = report.section
@@ -414,6 +480,7 @@ toggle.addEventListener('click', () => {
     void ctx.resume()
     startedAt = ctx.currentTime
     engine.setChords(activeChords())
+    engine.setMotion(state.motion)
     engine.setParams(state.params)
     engine.start()
     toggle.textContent = 'Stop'
@@ -432,6 +499,7 @@ required<HTMLButtonElement>('#copy').addEventListener('click', async (event) => 
     name: state.preset || 'Untitled',
     chordSet: state.chordSet,
     chords: [...state.enabled],
+    motion: [...state.motion],
     params: { ...state.params },
   }
   await navigator.clipboard.writeText(JSON.stringify(preset, null, 2))

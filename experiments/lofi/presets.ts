@@ -12,7 +12,7 @@
  * marked, since in use the distinction rarely matters.
  */
 
-import { CHORD_SETS, type ChordSetName } from './harmony'
+import { CHORD_SETS, DEFAULT_MOTION, type ChordSetName } from './harmony'
 import { BASE, type MusicParams } from './params'
 
 export interface Preset {
@@ -23,6 +23,8 @@ export interface Preset {
    * which is also what a set loaded from an older save with no selection will do.
    */
   chords: number[]
+  /** Root-motion weights by scale degrees risen, 0 to 6. Part of the feel. */
+  motion: number[]
   params: MusicParams
 }
 
@@ -33,12 +35,15 @@ export const BUILT_IN: Preset[] = [
     name: 'Beach',
     chordSet: 'aeolian',
     chords: [],
+    motion: [...DEFAULT_MOTION],
     params: withBase({}),
   },
   {
     name: 'Dawn',
     chordSet: 'lydian',
     chords: [],
+    // Lydian floats best when it keeps rising; the retrogression is shut off entirely.
+    motion: [0, 4, 3, 5, 4, 3, 0],
     // Brighter, higher, and busier with bells: the lift only reads if the top end is
     // actually there to hear.
     params: withBase({
@@ -57,6 +62,7 @@ export const BUILT_IN: Preset[] = [
     name: 'Dusk',
     chordSet: 'dorian',
     chords: [],
+    motion: [...DEFAULT_MOTION],
     params: withBase({
       brightness: 1400,
       chordSeconds: 12,
@@ -69,6 +75,8 @@ export const BUILT_IN: Preset[] = [
     name: 'Night',
     chordSet: 'phrygian',
     chords: [],
+    // Dark and static: thirds either way, which share two notes and barely move.
+    motion: [0, 1, 4, 3, 1, 5, 1],
     // Slow, dark and sparse. The bass carries more of it because there is less above.
     params: withBase({
       brightness: 700,
@@ -88,6 +96,8 @@ export const BUILT_IN: Preset[] = [
     name: 'Drift',
     chordSet: 'quartal',
     chords: [],
+    // Placeless by design, so no motion is preferred over any other.
+    motion: [0, 3, 3, 3, 3, 3, 3],
     // Almost no movement at all: very long chords, a long tail, and bells rare enough
     // to be an event rather than a texture.
     params: withBase({
@@ -118,6 +128,10 @@ export function loadSaved(): Preset[] {
     if (!Array.isArray(parsed)) return []
     return parsed.filter(isPreset).map((preset) => ({
       ...preset,
+      // Presets saved before motion weights existed get the defaults.
+      motion: Array.isArray(preset.motion) && preset.motion.length === 7
+        ? preset.motion
+        : [...DEFAULT_MOTION],
       // Merged over BASE so a preset saved before a parameter existed still loads, with
       // the new parameter at its default rather than undefined.
       params: { ...BASE, ...preset.params },

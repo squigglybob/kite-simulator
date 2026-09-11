@@ -27,6 +27,8 @@ export interface Chord {
   name: string
   /** Semitones above the tonic. */
   root: number
+  /** Which degree of the scale it is built on, 0 to 6. Root motion is judged by this. */
+  degree: number
   /** Semitones above the chord root. Values past 12 are extensions, kept up there. */
   intervals: number[]
 }
@@ -36,86 +38,158 @@ export interface ChordSet {
   label: string
   /** What it feels like, so the choice can be made without playing all of them. */
   feel: string
-  /** Ordered by root, so adjacent indices are adjacent scale degrees. */
-  chords: Chord[]
+  /** The seven degrees of the mode, as semitones above the tonic. */
+  scale: number[]
+  /** Which degrees carry a chord, as indices into `scale`, in ascending order. */
+  degrees: number[]
+  /** Scale steps between stacked notes. 2 stacks thirds, 3 stacks fourths. */
+  stack: number
 }
 
-export const CHORD_SETS = {
+/**
+ * Chords are built from the scale, never written out by hand.
+ *
+ * Hand-written interval lists are how three of these sets ended up containing notes
+ * outside their own mode — an aeolian set with both a flat and a natural sixth in it,
+ * so that two of its chords clashed by a semitone with the other four. Stacking degrees
+ * of a declared scale makes that impossible: the quality of each chord falls out of
+ * where it sits in the mode, which is what diatonic harmony is.
+ */
+export const CHORD_SETS: Record<string, ChordSet> = {
   aeolian: {
     label: 'Aeolian',
     feel: 'warm, wistful, settled — the original beach set',
-    chords: [
-      { name: 'i m9', root: 0, intervals: [0, 3, 7, 10, 14] },
-      { name: 'III maj7', root: 3, intervals: [0, 4, 7, 11, 14] },
-      { name: 'iv m11', root: 5, intervals: [0, 3, 7, 10, 17] },
-      { name: 'v m7', root: 7, intervals: [0, 3, 7, 10, 14] },
-      { name: 'VI maj7', root: 8, intervals: [0, 4, 7, 11, 14] },
-      { name: 'VII sus2', root: 10, intervals: [0, 2, 7, 11] },
-    ],
+    scale: [0, 2, 3, 5, 7, 8, 10],
+    degrees: [0, 2, 3, 4, 5, 6],
+    stack: 2,
   },
   dorian: {
     label: 'Dorian',
-    feel: 'wistful but hopeful — the major fourth is what lifts it',
-    chords: [
-      { name: 'i m9', root: 0, intervals: [0, 3, 7, 10, 14] },
-      { name: 'ii m7', root: 2, intervals: [0, 3, 7, 10] },
-      { name: 'III maj7', root: 3, intervals: [0, 4, 7, 11, 14] },
-      { name: 'IV maj7', root: 5, intervals: [0, 4, 7, 11, 14] },
-      { name: 'v m7', root: 7, intervals: [0, 3, 7, 10, 14] },
-      { name: 'VII maj7', root: 10, intervals: [0, 4, 7, 11] },
-    ],
+    feel: 'wistful but hopeful — the major sixth is what lifts it',
+    scale: [0, 2, 3, 5, 7, 9, 10],
+    degrees: [0, 1, 2, 3, 4, 6],
+    stack: 2,
   },
   lydian: {
     label: 'Lydian',
     feel: 'bright, floating, unresolved — the sharp fourth never lands',
-    chords: [
-      { name: 'I maj9', root: 0, intervals: [0, 4, 7, 11, 14] },
-      { name: 'II add9', root: 2, intervals: [0, 4, 7, 14] },
-      { name: 'iii m7', root: 4, intervals: [0, 3, 7, 10] },
-      { name: 'V maj7', root: 7, intervals: [0, 4, 7, 11, 14] },
-      { name: 'vi m9', root: 9, intervals: [0, 3, 7, 10, 14] },
-      { name: 'vii m7', root: 11, intervals: [0, 3, 7, 10] },
-    ],
+    scale: [0, 2, 4, 6, 7, 9, 11],
+    degrees: [0, 1, 2, 4, 5, 6],
+    stack: 2,
   },
   phrygian: {
     label: 'Phrygian',
     feel: 'dark and still — the flat second gives it the shadow',
-    chords: [
-      { name: 'i m9', root: 0, intervals: [0, 3, 7, 10, 14] },
-      { name: 'II maj7', root: 1, intervals: [0, 4, 7, 11] },
-      { name: 'III maj7', root: 3, intervals: [0, 4, 7, 11, 14] },
-      { name: 'iv m7', root: 5, intervals: [0, 3, 7, 10, 17] },
-      { name: 'VI maj7', root: 8, intervals: [0, 4, 7, 11] },
-      { name: 'vii m7', root: 10, intervals: [0, 3, 7, 10] },
-    ],
+    scale: [0, 1, 3, 5, 7, 8, 10],
+    degrees: [0, 1, 2, 3, 5, 6],
+    stack: 2,
+  },
+  mixolydian: {
+    label: 'Mixolydian',
+    feel: 'open and easy — major, but the flat seventh never pulls home',
+    scale: [0, 2, 4, 5, 7, 9, 10],
+    degrees: [0, 1, 3, 4, 5, 6],
+    stack: 2,
   },
   quartal: {
     label: 'Quartal',
     feel: 'open and placeless — fourths imply no key, so it never resolves',
-    chords: [
-      { name: 'sus 0', root: 0, intervals: [0, 5, 10, 15] },
-      { name: 'sus 2', root: 2, intervals: [0, 5, 10] },
-      { name: 'sus 5', root: 5, intervals: [0, 5, 10, 15] },
-      { name: 'sus 7', root: 7, intervals: [0, 5, 10] },
-      { name: 'sus 9', root: 9, intervals: [0, 5, 10, 15] },
-      { name: 'sus 10', root: 10, intervals: [0, 5, 10] },
-    ],
+    scale: [0, 2, 3, 5, 7, 9, 10],
+    degrees: [0, 1, 2, 3, 4, 5],
+    stack: 3,
   },
-} as const satisfies Record<string, ChordSet>
+}
 
-export type ChordSetName = keyof typeof CHORD_SETS
+export type ChordSetName = string
 
-export const CHORD_SET_NAMES = Object.keys(CHORD_SETS) as ChordSetName[]
+export const CHORD_SET_NAMES = Object.keys(CHORD_SETS)
 
-export const chordsOf = (name: ChordSetName): readonly Chord[] => CHORD_SETS[name].chords
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII']
+
+/** The nth note above a degree, staying inside the scale and rising by octaves. */
+function stackNote(scale: number[], degree: number, step: number): number {
+  const index = degree + step
+  return scale[((index % 7) + 7) % 7] + 12 * Math.floor(index / 7)
+}
 
 /**
- * Weight for a move of n scale steps, where the pool wraps so the largest possible
- * distance is three. Zero for a repeat — holding the same chord twice reads as the
- * generator having stalled, not as a musical choice — and falling off with distance, so
- * it wanders by step and leaps only occasionally.
+ * A name that says what the chord actually is, derived rather than typed, so it cannot
+ * drift out of step with the notes the way a hand-written label can.
  */
-const STEP_WEIGHT = [0, 4, 3, 2]
+function nameOf(degree: number, intervals: number[], stack: number): string {
+  if (stack !== 2) return `${ROMAN[degree]} sus`
+  const third = intervals[1]
+  const fifth = intervals[2]
+  const seventh = intervals[3]
+  const ninth = intervals[4]
+
+  const minor = third === 3
+  const numeral = minor ? ROMAN[degree].toLowerCase() : ROMAN[degree]
+  if (fifth === 6) return `${numeral} m7b5`
+
+  const quality = seventh === 11 ? 'maj7' : minor ? 'm7' : '7'
+  if (ninth === 14) return `${numeral} ${seventh === 11 ? 'maj9' : minor ? 'm9' : '9'}`
+  return `${numeral} ${quality}`
+}
+
+function build(set: ChordSet): Chord[] {
+  return set.degrees.map((degree) => {
+    const root = set.scale[degree]
+    const intervals = [0, 1, 2, 3].map((k) => stackNote(set.scale, degree, k * set.stack) - root)
+
+    // The ninth is added only where it is a major ninth. A minor ninth against the root
+    // is the harshest interval in the set and it appears on exactly the degrees where
+    // the scale has a semitone two steps up, so it has to be tested for rather than
+    // assumed. Fourth-stacked chords get no extension at all; they are already wide.
+    if (set.stack === 2) {
+      const ninth = stackNote(set.scale, degree, 4 * set.stack) - root
+      if (ninth === 14) intervals.push(ninth)
+    }
+
+    return { name: nameOf(degree, intervals, set.stack), root, degree, intervals }
+  })
+}
+
+const built = new Map<string, Chord[]>()
+
+export function chordsOf(name: ChordSetName): readonly Chord[] {
+  const cached = built.get(name)
+  if (cached) return cached
+  const set = CHORD_SETS[name] ?? CHORD_SETS.aeolian
+  const chords = build(set)
+  built.set(name, chords)
+  return chords
+}
+
+/**
+ * How good each kind of root motion is, indexed by how many scale degrees the root
+ * rises. This replaces weighting by position in the list, which knew nothing about
+ * music: it rated a move by how far apart two chords sat in an array, and so rated
+ * i to VII — a step down, the weakest move there is — as the single most likely
+ * choice in the set.
+ *
+ * The ordering here is the common-practice one. Root rising a fourth is the strongest
+ * progression in tonal music and covers v-i, ii-V and vi-ii. Falling a third is nearly
+ * as good and keeps two notes in common. Rising a step has no common tones at all,
+ * which reads as motion rather than drift. Falling a step is the retrogression every
+ * textbook warns about, so it is possible but rare — VII still gets reached, by
+ * arriving from somewhere else and resolving up into i.
+ *
+ * Every value is exposed in the panel, because "wonky" is a judgement of taste before
+ * it is a rule, and these are only defaults.
+ */
+export const MOTION_LABELS = [
+  'repeat',
+  'step up',
+  'third up',
+  'fourth up',
+  'fifth up',
+  'third down',
+  'step down',
+]
+
+export const DEFAULT_MOTION = [0, 3, 2, 5, 3, 4, 1]
+
 /** Added to the tonic's weight so the progression keeps drifting back to home. */
 const TONIC_PULL = 1.5
 
@@ -156,35 +230,49 @@ function fold(midi: number, low: number, high: number): number {
 }
 
 /** Circular distance between two pool indices. */
-const stepsBetween = (a: number, b: number, size: number): number => {
-  const raw = Math.abs(a - b) % size
-  return Math.min(raw, size - raw)
-}
-
 /**
- * The next chord, chosen from whichever set is active. With a pool narrowed to one or
- * two chords every weight would be zero and the walk would stall, so a single-chord pool
- * simply stays put and a pair alternates.
+ * The next chord, chosen by how good the root motion is.
+ *
+ * With a pool narrowed to one or two chords every weight would be zero and the walk
+ * would stall, so a single chord simply stays put and a pair alternates. If the motion
+ * weights are all set to zero the same would happen, so that falls back to an even
+ * choice among everything but the current chord — a panel setting should never be able
+ * to make the music stop.
  */
-export function nextChord(current: number, rng: () => number, size: number): number {
+export function nextChord(
+  current: number,
+  rng: () => number,
+  chords: readonly Chord[],
+  motion: readonly number[] = DEFAULT_MOTION,
+): number {
+  const size = chords.length
   if (size <= 1) return 0
   if (size === 2) return current === 0 ? 1 : 0
 
-  const weights = Array.from({ length: size }, (_, i) => {
-    const step = STEP_WEIGHT[stepsBetween(current, i, size)] ?? 0
-    // A zero is never rescued by the tonic pull. Without this guard, sitting on the
-    // tonic gives it a weight of TONIC_PULL against its own zero and the progression
-    // repeats a chord roughly once every seventy.
-    if (step === 0) return 0
-    return i === 0 ? step + TONIC_PULL : step
+  const from = chords[current].degree
+  const weights = chords.map((chord, i) => {
+    if (i === current) return 0
+    const rise = (((chord.degree - from) % 7) + 7) % 7
+    const weight = motion[rise] ?? 0
+    // A zero is never rescued by the tonic pull, or a motion the panel has ruled out
+    // would come back through the side door.
+    if (weight <= 0) return 0
+    return chord.degree === 0 ? weight + TONIC_PULL : weight
   })
 
-  let roll = rng() * weights.reduce((sum, w) => sum + w, 0)
+  const total = weights.reduce((sum, w) => sum + w, 0)
+  if (total <= 0) {
+    // Everything reachable has been ruled out; move somewhere rather than stall.
+    const step = 1 + Math.floor(rng() * (size - 1))
+    return (current + step) % size
+  }
+
+  let roll = rng() * total
   for (let i = 0; i < weights.length; i++) {
     roll -= weights[i]
     if (roll <= 0) return i
   }
-  return 0
+  return current === 0 ? 1 : 0
 }
 
 /**

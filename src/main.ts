@@ -1,4 +1,6 @@
 import { Ambience } from './audio/ambience'
+import { Mixer } from './audio/mixer'
+import { TrackPlayer } from './audio/tracks'
 import { startLoop } from './core/loop'
 import { add, scale, sub, v3, type Vec3 } from './core/vec3'
 import { createInput } from './input/keys'
@@ -24,7 +26,7 @@ import { sagDepth } from './sim/line'
 import { World } from './sim/world'
 import { drawHud } from './ui/hud'
 import { drawWindWindow } from './ui/windwindow'
-import { createTuningPanel, loadSavedConfig } from './ui/tuning'
+import { createTuningPanel, loadSavedConfig, saveConfig } from './ui/tuning'
 import { drawForceVectors } from './ui/vectors'
 
 const canvas = document.querySelector<HTMLCanvasElement>('#screen')
@@ -43,11 +45,60 @@ const clouds = new CloudField()
 // whenever it finishes loading.
 void loadScenery()
 
-// Downloaded and decoded straight away, but silent until the first key or click — no
-// browser will start audio before the page has been interacted with.
-const ambience = new Ambience()
-void ambience.load()
-ambience.unlockOn()
+/**
+ * The audio stage: one context, a channel per source, and everything loading straight
+ * away but silent until the first key or click, since no browser will start audio
+ * before the page has been interacted with.
+ *
+ * Wrapped because a page that cannot make a sound is still a perfectly playable game,
+ * and this is the one place where that can be said once rather than at every call.
+ */
+const audio = ((): { apply: () => void; toggleMasterMute: () => void } | null => {
+  try {
+    const mixer = new Mixer()
+    const ambienceChannel = mixer.channel('ambience')
+    const musicChannel = mixer.channel('music')
+
+    const ambience = new Ambience(mixer.ctx, ambienceChannel.input)
+    void ambience.load()
+
+    const tracks = new TrackPlayer(mixer.ctx, musicChannel.input)
+
+    const apply = (): void => {
+      const a = config.audio
+      mixer.setMasterVolume(a.masterVolume)
+      mixer.setMasterMuted(a.masterMuted)
+      ambienceChannel.setVolume(a.ambienceVolume)
+      ambienceChannel.setMuted(a.ambienceMuted)
+      musicChannel.setVolume(a.musicVolume)
+      musicChannel.setMuted(a.musicMuted)
+      // Sources are switched, never layered: only one can hold the music channel. The
+      // unlock test is load-bearing: `play()` is rejected outright before the first
+      // gesture, and a player that starts and fails there never gets a second chance.
+      tracks.setPlaying(mixer.isUnlocked && a.musicSource === 'tracks')
+    }
+
+    apply()
+    mixer.onUnlock(() => {
+      ambience.start()
+      apply()
+    })
+    mixer.unlockOn()
+
+    return {
+      apply,
+      toggleMasterMute: () => {
+        config.audio.masterMuted = !config.audio.masterMuted
+        mixer.setMasterMuted(config.audio.masterMuted)
+        // Mute is a decision, not a transient, so it outlives the reload.
+        saveConfig()
+        panel.refresh()
+      },
+    }
+  } catch {
+    return null
+  }
+})()
 const kiteRenderer = new KiteRenderer()
 
 /**
@@ -67,7 +118,7 @@ const panel = createTuningPanel({
   },
   onSetUpForLaunch: setUpForLaunch,
   onChange: (path) => {
-    if (path.startsWith('audio.')) ambience.refreshVolume()
+    if (path.startsWith('audio.')) audio?.apply()
   },
 })
 let showVectors = false
@@ -84,7 +135,7 @@ input.onPress('KeyR', () => {
 })
 input.onPress('KeyV', () => (showVectors = !showVectors))
 input.onPress('KeyT', () => panel.toggle())
-input.onPress('KeyM', () => ambience.toggleMute())
+input.onPress('KeyM', () => audio?.toggleMasterMute())
 input.onPress('KeyH', () => (showDebug = !showDebug))
 input.onPress('KeyW', () => (showWindow = !showWindow))
 input.onPress('Space', setUpForLaunch)

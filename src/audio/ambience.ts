@@ -9,8 +9,8 @@ import { config } from '../sim/config'
  * fades up over a few seconds, runs, and fades back down, with the next one starting
  * mid-fade. The join lands in the middle of a crossfade where there is nothing to hear.
  *
- * Browsers will not start audio before the page has been interacted with, so the whole
- * thing waits for the first key or click and then fades up from silence.
+ * Level, mute and the gesture that starts the audio all belong to the mixer channel
+ * this feeds; what is left here is the scheduling that makes the loop inaudible.
  */
 
 const TRACK =
@@ -19,87 +19,68 @@ const TRACK =
 /** How far ahead the next pass is queued. Comfortably longer than the pump interval. */
 const LOOKAHEAD = 6
 const PUMP_INTERVAL = 2000
-/** Seconds the bed takes to arrive when the game starts, and to leave when muted. */
-const OPENING_FADE = 2.5
-const MUTE_FADE = 0.5
 
 export class Ambience {
-  private context: AudioContext | null = null
-  private master: GainNode | null = null
   private buffer: AudioBuffer | null = null
   private nextStart = 0
   private pump = 0
-  private muted = false
-  private started = false
-
   /**
-   * Begins loading immediately but does not make a sound until `unlockOn` fires. The
-   * download and decode are the slow part, so getting them underway early means the bed
-   * is ready the moment the player touches a key.
+   * Download and unlock race each other, and either order is normal: a player who
+   * clicks immediately beats the 2 MB clip, one who reads the page first does not.
+   * Both are recorded and whichever lands second starts the bed.
    */
+  private wanted = false
+  private running = false
+
+  constructor(
+    private readonly ctx: AudioContext,
+    private readonly destination: AudioNode,
+  ) {}
+
+  /** Begins downloading straight away; makes no sound until `start` is also called. */
   async load(): Promise<void> {
-    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!Ctor) return
-
-    this.context = new Ctor()
-    this.master = this.context.createGain()
-    this.master.gain.value = 0
-    this.master.connect(this.context.destination)
-
     try {
       const response = await fetch(TRACK)
       if (!response.ok) throw new Error(`${response.status}`)
-      this.buffer = await this.context.decodeAudioData(await response.arrayBuffer())
+      this.buffer = await this.ctx.decodeAudioData(await response.arrayBuffer())
     } catch {
       // No ambience is a perfectly playable game; never let it take the page down.
       this.buffer = null
+      return
     }
+    if (this.wanted) this.begin()
   }
 
-  /** Starts the bed on the first real interaction, which is when browsers allow it. */
-  unlockOn(target: EventTarget = window): void {
-    const begin = () => {
-      target.removeEventListener('keydown', begin)
-      target.removeEventListener('pointerdown', begin)
-      void this.start()
-    }
-    target.addEventListener('keydown', begin)
-    target.addEventListener('pointerdown', begin)
+  /** Called once the context is unlocked. Safe before the clip has arrived. */
+  start(): void {
+    this.wanted = true
+    if (this.buffer) this.begin()
   }
 
-  private async start(): Promise<void> {
-    if (this.started || !this.context || !this.master || !this.buffer) return
-    this.started = true
-
-    if (this.context.state === 'suspended') await this.context.resume()
-
-    const now = this.context.currentTime
-    this.master.gain.cancelScheduledValues(now)
-    this.master.gain.setValueAtTime(0, now)
-    this.master.gain.linearRampToValueAtTime(this.target(), now + OPENING_FADE)
-
-    this.nextStart = now + 0.05
+  private begin(): void {
+    if (this.running) return
+    this.running = true
+    this.nextStart = this.ctx.currentTime + 0.05
     this.schedule()
     this.pump = window.setInterval(() => this.schedule(), PUMP_INTERVAL)
   }
 
   /** Queues whatever passes fall inside the lookahead window. */
   private schedule(): void {
-    const ctx = this.context
     const buffer = this.buffer
-    if (!ctx || !buffer || !this.master) return
+    if (!buffer) return
 
     const fade = Math.max(0.05, Math.min(config.audio.crossfadeSeconds, buffer.duration / 3))
 
-    while (this.nextStart < ctx.currentTime + LOOKAHEAD) {
-      const at = Math.max(this.nextStart, ctx.currentTime + 0.02)
+    while (this.nextStart < this.ctx.currentTime + LOOKAHEAD) {
+      const at = Math.max(this.nextStart, this.ctx.currentTime + 0.02)
 
-      const source = ctx.createBufferSource()
+      const source = this.ctx.createBufferSource()
       source.buffer = buffer
 
-      const gain = ctx.createGain()
+      const gain = this.ctx.createGain()
       source.connect(gain)
-      gain.connect(this.master)
+      gain.connect(this.destination)
 
       gain.gain.setValueAtTime(0, at)
       gain.gain.linearRampToValueAtTime(1, at + fade)
@@ -108,6 +89,10 @@ export class Ambience {
 
       source.start(at)
       source.stop(at + buffer.duration + 0.05)
+      source.addEventListener('ended', () => {
+        source.disconnect()
+        gain.disconnect()
+      })
 
       // The next pass begins while this one is still fading out, so the two overlap
       // exactly across the crossfade.
@@ -115,38 +100,10 @@ export class Ambience {
     }
   }
 
-  private target(): number {
-    return this.muted ? 0 : Math.max(0, Math.min(config.audio.volume, 1))
-  }
-
-  /** Applies a volume change from the tuning panel without a click. */
-  refreshVolume(): void {
-    if (!this.context || !this.master || !this.started) return
-    const now = this.context.currentTime
-    this.master.gain.cancelScheduledValues(now)
-    this.master.gain.setTargetAtTime(this.target(), now, 0.08)
-  }
-
-  toggleMute(): boolean {
-    this.muted = !this.muted
-    if (this.context && this.master && this.started) {
-      const now = this.context.currentTime
-      this.master.gain.cancelScheduledValues(now)
-      this.master.gain.setValueAtTime(this.master.gain.value, now)
-      this.master.gain.linearRampToValueAtTime(this.target(), now + MUTE_FADE)
-    }
-    return this.muted
-  }
-
-  get isMuted(): boolean {
-    return this.muted
-  }
-
   stop(): void {
     clearInterval(this.pump)
-    void this.context?.close()
-    this.context = null
-    this.master = null
-    this.started = false
+    this.pump = 0
+    this.running = false
+    this.wanted = false
   }
 }

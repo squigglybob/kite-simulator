@@ -6,6 +6,12 @@
  * physical constant; if a number wants tuning, it belongs here.
  */
 
+/**
+ * `generated` is reserved for the procedural engine and is deliberately absent from the
+ * tuning panel until that lands — an option that does nothing is worse than no option.
+ */
+export type MusicSource = 'off' | 'generated' | 'tracks'
+
 export interface Config {
   env: {
     airDensity: number
@@ -150,10 +156,24 @@ export interface Config {
     waveSpeed: number
   }
   audio: {
-    /** Ambient bed level, 0 to 1. */
-    volume: number
-    /** Seconds of overlap where each pass of the loop crossfades into the next. */
+    /** Everything, after the per-channel levels. 0 to 1. */
+    masterVolume: number
+    masterMuted: boolean
+    /** Sea and gulls. */
+    ambienceVolume: number
+    ambienceMuted: boolean
+    /**
+     * Which music plays, if any. `generated` is the procedural engine and joins the
+     * tuning panel once it exists; the two never play together, since beat-driven lofi
+     * over a tempo-less drone is mud.
+     */
+    musicSource: MusicSource
+    musicVolume: number
+    musicMuted: boolean
+    /** Seconds of overlap where each pass of the ambience loop crossfades into the next. */
     crossfadeSeconds: number
+    /** Seconds of overlap between one recorded track and the next. */
+    trackCrossfadeSeconds: number
   }
   camera: {
     /** Distance the camera sits behind the flyer. Also what keeps a kite at 90 degrees
@@ -232,8 +252,15 @@ export const config: Config = {
     waveSpeed: 1.1,
   },
   audio: {
-    volume: 0.55,
+    masterVolume: 0.9,
+    masterMuted: false,
+    ambienceVolume: 0.55,
+    ambienceMuted: false,
+    musicSource: 'tracks',
+    musicVolume: 0.35,
+    musicMuted: false,
     crossfadeSeconds: 4,
+    trackCrossfadeSeconds: 8,
   },
   camera: {
     dist: 20,

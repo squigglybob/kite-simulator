@@ -204,6 +204,25 @@ const BELL_HIGH = 93
 
 export type VoiceName = 'pad' | 'bass' | 'bell'
 
+/**
+ * Percussion, which is not a note and so is not a NoteEvent.
+ *
+ * There is no grid and no tempo here: hits are scattered through the chord the same way
+ * the bells are. That is the whole point of this stage — texture that makes the room
+ * feel less static, without committing the piece to a pulse it was not built around.
+ */
+export type PercTimbre = 'shaker' | 'tap' | 'swell'
+
+export interface PercEvent {
+  timbre: PercTimbre
+  /** Seconds after the chord begins. */
+  at: number
+  /** Resonant frequency for a tap, or filter centre for the noisy timbres. */
+  freq: number
+  level: number
+  pan: number
+}
+
 export interface NoteEvent {
   voice: VoiceName
   midi: number
@@ -355,6 +374,56 @@ export function voiceBass(
  * bells start sounding like a metronome within a minute, which is the one thing a
  * piece with no tempo must not do.
  */
+/** A tap is tuned to the chord, so it reads as part of the music rather than over it. */
+const TAP_LOW = 64
+const TAP_HIGH = 83
+
+export function voicePerc(
+  chord: Chord,
+  params: MusicParams,
+  shape: Shape,
+  duration: number,
+  rng: () => number,
+): PercEvent[] {
+  const expected = (params.percRate / 60) * duration * shape.perc
+  const events: PercEvent[] = []
+
+  let remaining = expected
+  while (remaining > 0 && events.length < 24) {
+    if (remaining < 1 && rng() > remaining) break
+    remaining -= 1
+
+    const bright = clamp01(params.percTone)
+    const swell = rng() < clamp01(params.percSwell)
+    // Below the swell chance, `percTone` decides how often a hit is airy noise rather
+    // than a tuned wooden knock — one dial from dry and woody to loose and brushy.
+    const timbre: PercTimbre = swell ? 'swell' : rng() < bright ? 'shaker' : 'tap'
+
+    let freq: number
+    if (timbre === 'tap') {
+      const interval = chord.intervals[Math.floor(rng() * chord.intervals.length)]
+      freq = midiToFreq(fold(params.root + chord.root + interval, TAP_LOW, TAP_HIGH))
+    } else if (timbre === 'shaker') {
+      freq = 4000 + rng() * 5000
+    } else {
+      freq = 1800 + rng() * 3000
+    }
+
+    events.push({
+      timbre,
+      // Unlike the bells, a hit may land straight away: percussion is texture rather
+      // than a comment on the chord, so it has nothing to wait for.
+      at: rng() * duration,
+      freq,
+      // Swells are washes rather than accents, so they sit well back.
+      level: (swell ? 0.3 : 0.55) + rng() * 0.45,
+      pan: (rng() * 2 - 1) * 0.8,
+    })
+  }
+
+  return events.sort((a, b) => a.at - b.at)
+}
+
 export function voiceBells(
   chord: Chord,
   params: MusicParams,

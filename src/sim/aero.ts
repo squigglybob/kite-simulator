@@ -34,9 +34,13 @@ export function dragCoefficient(alpha: number): number {
   return config.kite.cd0 + 2 * s * s
 }
 
-/** Dynamic pressure times area — the common factor of both aerodynamic forces. */
-export function dynamicPressure(speed: number): number {
-  return 0.5 * config.env.airDensity * speed * speed * config.kite.area
+/**
+ * Dynamic pressure times area — the common factor of both aerodynamic forces. The
+ * area is a parameter because the sail is simulated as two panels of half the kite
+ * each, which see different airflow.
+ */
+export function dynamicPressure(speed: number, area = config.kite.area): number {
+  return 0.5 * config.env.airDensity * speed * speed * area
 }
 
 /**

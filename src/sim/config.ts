@@ -12,6 +12,121 @@
  */
 export type MusicSource = 'off' | 'generated' | 'tracks'
 
+/** The kites you can put on the line. */
+export type KiteType = 'diamond' | 'delta'
+
+/**
+ * One kite's numbers. Every kite carries its own full set, so tuning the delta cannot
+ * quietly move the diamond out from under you.
+ */
+export interface KiteParams {
+  mass: number
+  area: number
+  /**
+   * Bridle leg lengths, in spine-lengths. The upper pair run from the cross spar, the
+   * lower one from down the spine; where they meet is the tow point, and the angle the
+   * line makes with the kite falls out of that triangle. Adjusting a length is what
+   * you would actually do to a kite, and it keeps the drawn bridle and the simulated
+   * one the same object.
+   *
+   * Lengthening the lower leg walks the tow point toward the nose, which raises the
+   * angle of attack — the fore-aft adjustment every kite flyer makes.
+   */
+  bridleUpper: number
+  bridleLower: number
+  /**
+   * Where the centre of pressure sits along the spine, in spine-lengths from the
+   * centre, as `base + slope * sin(alpha)`. Its travel with incidence is what makes
+   * pitch self-correcting: the kite trims to wherever the pressure lines up with the
+   * bridle's tow point, so the two together set the flying angle.
+   */
+  cpBase: number
+  cpSlope: number
+  /** The tail's drag area in square metres, and how far behind the centre of mass
+   *  it acts, in spine-lengths. Being on a lever arm is what makes it *restore*
+   *  attitude and not merely damp it — and it stops working in still air, which is
+   *  what lets a stalled kite tumble. */
+  tailDrag: number
+  tailArm: number
+  /** Tail weight per metre of length. Gravity on this, out on the tail's arm, is a
+   *  pendulum holding the kite upright — and unlike the aerodynamic terms it keeps
+   *  working when the wind drops. Multiplied by `tailLength`, so the tail you can
+   *  see is the tail that steadies the kite. */
+  tailMassPerMetre: number
+  /** The kite's own surface resisting rotation — a large moment for a flat plate,
+   *  and the main thing keeping pitch from slowly diverging. Needs airflow. */
+  aeroDamping: number
+  /** A trace of always-on damping, so a kite turning in dead air eventually stops. */
+  spinDamping: number
+  /**
+   * Sideslip response — what happens when the air runs across the span instead of
+   * down the spine. `sideslipLift` is the fraction of its lift a kite dragged
+   * broadside gives up, `sideslipDrag` the extra drag coefficient it picks up.
+   *
+   * This is the pair that ties heading to travel. A flat plate makes exactly the
+   * same lift whichever way round it is within its own plane, so nothing connects
+   * where the kite points to where it goes and it crabs; a real kite's sail luffs
+   * the moment it is slid sideways, so the only heading that works is the one it is
+   * facing. Set `sideslipLift` to zero to get the old direction-blind plate back.
+   */
+  sideslipLift: number
+  sideslipDrag: number
+  /**
+   * How far each half of the sail is tilted up out of the flat plane, about the
+   * spine, in degrees. On a real kite this is the bow in the cross spar, or the
+   * angle a delta's spreader holds between its two sides.
+   *
+   * This is the kite's roll stability, and it cannot be faked with a flat plate. When
+   * a kite slides sideways, the windward half of a dihedralled sail meets the air more
+   * squarely than the leeward half; the two halves then make unequal lift and the kite
+   * rolls back upright. A single plate makes one force on one point of the spine and
+   * so has no way to produce a rolling moment at all, whatever the angle.
+   */
+  dihedralDeg: number
+  /**
+   * The keel: the vertical fin a delta hangs under its sail, as an area in square
+   * metres, a position along the spine and how far it drops off the windward face
+   * (both in spine-lengths).
+   *
+   * This is how a tailless kite knows which way is up. The fin is a flat plate facing
+   * sideways, so it does nothing in straight flight and bites hard the moment the kite
+   * slews across the airflow; sitting behind and below the tow point, that bite swings
+   * the nose back into the wind. A diamond does the same job with a tail and carries
+   * no keel, which is why `keelArea` is zero for it.
+   *
+   * A stunt kite deliberately runs a small keel. Too much and it insists on pointing
+   * into the wind, which is exactly what you do not want from a kite you are steering.
+   */
+  keelArea: number
+  keelAlong: number
+  keelDrop: number
+  /** Angle of attack at which lift collapses, degrees. */
+  stallDeg: number
+  /** Degrees over which the stall blends in. */
+  stallBlendDeg: number
+  clScale: number
+  cdScale: number
+  /** Parasitic drag at zero angle of attack. */
+  cd0: number
+  /** Drawn size relative to true size. Purely visual — the physics always uses the
+   *  real area. A kite 30 m away is honestly only a few pixels across, which is
+   *  unreadable when it is the thing you are controlling. */
+  visualScale: number
+  /**
+   * Spine length divided by span — how tall the kite is relative to its width. Area
+   * is held constant as this changes, so the physics is untouched: the flat-plate
+   * model only cares about area. (A real aspect ratio does change lift slope and
+   * induced drag; this model does not capture that.)
+   *
+   * Worth knowing that the drawn kite always looks wider than this value suggests,
+   * because the spine points away from the camera and foreshortens while the span
+   * does not.
+   */
+  aspect: number
+  /** Tail length in metres, before `visualScale` is applied. */
+  tailLength: number
+}
+
 export interface Config {
   env: {
     airDensity: number
@@ -31,86 +146,16 @@ export interface Config {
     turbHeight: number
     turbAmp: number
   }
-  kite: {
-    mass: number
-    area: number
-    /**
-     * Bridle leg lengths, in spine-lengths. The upper pair run from the cross spar, the
-     * lower one from down the spine; where they meet is the tow point, and the angle the
-     * line makes with the kite falls out of that triangle. Adjusting a length is what
-     * you would actually do to a kite, and it keeps the drawn bridle and the simulated
-     * one the same object.
-     *
-     * Lengthening the lower leg walks the tow point toward the nose, which raises the
-     * angle of attack — the fore-aft adjustment every kite flyer makes.
-     */
-    bridleUpper: number
-    bridleLower: number
-    /**
-     * Where the centre of pressure sits along the spine, in spine-lengths from the
-     * centre, as `base + slope * sin(alpha)`. Its travel with incidence is what makes
-     * pitch self-correcting: the kite trims to wherever the pressure lines up with the
-     * bridle's tow point, so the two together set the flying angle.
-     */
-    cpBase: number
-    cpSlope: number
-    /** The tail's drag area in square metres, and how far behind the centre of mass
-     *  it acts, in spine-lengths. Being on a lever arm is what makes it *restore*
-     *  attitude and not merely damp it — and it stops working in still air, which is
-     *  what lets a stalled kite tumble. */
-    tailDrag: number
-    tailArm: number
-    /** Tail weight per metre of length. Gravity on this, out on the tail's arm, is a
-     *  pendulum holding the kite upright — and unlike the aerodynamic terms it keeps
-     *  working when the wind drops. Multiplied by `tailLength`, so the tail you can
-     *  see is the tail that steadies the kite. */
-    tailMassPerMetre: number
-    /** The kite's own surface resisting rotation — a large moment for a flat plate,
-     *  and the main thing keeping pitch from slowly diverging. Needs airflow. */
-    aeroDamping: number
-    /** A trace of always-on damping, so a kite turning in dead air eventually stops. */
-    spinDamping: number
-    /**
-     * Sideslip response — what happens when the air runs across the span instead of
-     * down the spine. `sideslipLift` is the fraction of its lift a kite dragged
-     * broadside gives up, `sideslipDrag` the extra drag coefficient it picks up.
-     *
-     * This is the pair that ties heading to travel. A flat plate makes exactly the
-     * same lift whichever way round it is within its own plane, so nothing connects
-     * where the kite points to where it goes and it crabs; a real kite's sail luffs
-     * the moment it is slid sideways, so the only heading that works is the one it is
-     * facing. Set `sideslipLift` to zero to get the old direction-blind plate back.
-     */
-    sideslipLift: number
-    sideslipDrag: number
-    /** Angle of attack at which lift collapses, degrees. */
-    stallDeg: number
-    /** Degrees over which the stall blends in. */
-    stallBlendDeg: number
-    clScale: number
-    cdScale: number
-    /** Parasitic drag at zero angle of attack. */
-    cd0: number
-    /** Roll disturbance from the gust field, as a torque about the spine. */
-    rollGustGain: number
-    /** Drawn size relative to true size. Purely visual — the physics always uses the
-     *  real area. A kite 30 m away is honestly only a few pixels across, which is
-     *  unreadable when it is the thing you are controlling. */
-    visualScale: number
-    /**
-     * Spine length divided by span — how tall the kite is relative to its width. Area
-     * is held constant as this changes, so the physics is untouched: the flat-plate
-     * model only cares about area. (A real aspect ratio does change lift slope and
-     * induced drag; this model does not capture that.)
-     *
-     * Worth knowing that the drawn kite always looks wider than this value suggests,
-     * because the spine points away from the camera and foreshortens while the span
-     * does not.
-     */
-    aspect: number
-    /** Tail length in metres, before `visualScale` is applied. */
-    tailLength: number
-  }
+  /** Which kite is on the line. */
+  kiteType: KiteType
+  /** Every kite's own numbers, tuned independently. */
+  kites: Record<KiteType, KiteParams>
+  /**
+   * The kite currently flying. This is an *alias* into `kites`, not a copy, so a
+   * slider bound to `kite.mass` writes straight into the active preset and the other
+   * presets never see it. Always change it through `selectKite`.
+   */
+  kite: KiteParams
   line: {
     length: number
     minLength: number
@@ -209,30 +254,71 @@ export const config: Config = {
     turbHeight: 8,
     turbAmp: 1.1,
   },
-  kite: {
-    mass: 0.25,
-    area: 0.6,
-    bridleUpper: 0.467,
-    bridleLower: 0.413,
-    cpBase: -0.16,
-    cpSlope: -0.3,
-    tailDrag: 0.02,
-    tailArm: 1.2,
-    tailMassPerMetre: 0.04,
-    aeroDamping: 0.35,
-    spinDamping: 0.03,
-    sideslipLift: 0.9,
-    sideslipDrag: 0.7,
-    stallDeg: 16,
-    stallBlendDeg: 9,
-    clScale: 1,
-    cdScale: 1,
-    cd0: 0.1,
-    rollGustGain: 0.02,
-    visualScale: 2.2,
-    aspect: 1.5,
-    tailLength: 3.5,
+  kiteType: 'diamond',
+  kites: {
+    diamond: {
+      mass: 0.25,
+      area: 0.6,
+      bridleUpper: 0.467,
+      bridleLower: 0.413,
+      cpBase: -0.16,
+      cpSlope: -0.3,
+      tailDrag: 0.02,
+      tailArm: 1.2,
+      tailMassPerMetre: 0.04,
+      aeroDamping: 0.35,
+      spinDamping: 0.03,
+      sideslipLift: 0.9,
+      sideslipDrag: 0.7,
+      stallDeg: 16,
+      stallBlendDeg: 9,
+      clScale: 1,
+      cdScale: 1,
+      cd0: 0.1,
+      visualScale: 2.2,
+      aspect: 1.5,
+      tailLength: 3.5,
+      dihedralDeg: 6,
+      keelArea: 0,
+      keelAlong: -0.1,
+      keelDrop: 0.16,
+    },
+    delta: {
+      mass: 0.3,
+      area: 0.85,
+      bridleUpper: 0.467,
+      // Well forward of the diamond's, which puts the tow point *above* the centre of
+      // mass rather than below it. That is what a kite with little tail needs: hung
+      // from a point below its centre it wants to flip nose-down, and only a heavy
+      // tail holds it up. Swept headlessly — at the diamond's 0.413 this kite does not
+      // survive a single wind speed, and from about 0.62 it flies at all of them.
+      bridleLower: 0.64,
+      cpBase: -0.16,
+      cpSlope: -0.3,
+      tailDrag: 0.006,
+      tailArm: 1.2,
+      tailMassPerMetre: 0.04,
+      aeroDamping: 0.22,
+      spinDamping: 0.02,
+      sideslipLift: 0.9,
+      sideslipDrag: 0.7,
+      dihedralDeg: 20,
+      keelArea: 0.1,
+      keelAlong: -0.12,
+      keelDrop: 0.2,
+      stallDeg: 18,
+      stallBlendDeg: 9,
+      clScale: 1,
+      cdScale: 1,
+      cd0: 0.08,
+      visualScale: 2.2,
+      aspect: 0.75,
+      tailLength: 1.5,
+    },
   },
+  // Replaced immediately below by `selectKite`, which points it at `kites.diamond`.
+  // Written out in full first so the object satisfies `Config` on its own.
+  kite: null as unknown as KiteParams,
   line: {
     length: 30,
     minLength: 5,
@@ -282,3 +368,31 @@ export const config: Config = {
 
 /** Snapshot for the tuning panel's copy-to-clipboard. */
 export const cloneConfig = (): Config => structuredClone(config)
+
+/**
+ * Put a kite on the line. Repoints the `kite` alias rather than copying values, so
+ * every `config.kite.*` read in the simulation follows the switch and every slider
+ * writes into the preset it belongs to.
+ */
+export function selectKite(type: KiteType): void {
+  config.kiteType = type
+  config.kite = config.kites[type]
+}
+
+selectKite(config.kiteType)
+
+/**
+ * A copy safe to serialise. `kite` is an alias into `kites` and would otherwise be
+ * written out twice, then read back as a separate object — which silently breaks the
+ * aliasing on the next load.
+ */
+export function configSnapshot(): Omit<Config, 'kite'> {
+  const { kite: _active, ...rest } = config
+  return structuredClone(rest)
+}
+
+/** Restore a whole config, keeping the `kite` alias intact. Used by the test harness. */
+export function restoreConfig(saved: Omit<Config, 'kite'>): void {
+  Object.assign(config, structuredClone(saved))
+  selectKite(config.kiteType)
+}

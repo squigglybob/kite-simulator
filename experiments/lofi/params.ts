@@ -64,6 +64,15 @@ export interface MusicParams {
   /** Roughly how many bell notes sound per minute, before drift and dropouts. */
   bellRate: number
 
+  /** Percussion level, 0 to 1. */
+  percGain: number
+  /** Roughly how many percussion hits per minute. There is no grid; they are scattered. */
+  percRate: number
+  /** 0 is dry tuned wooden knocks, 1 is airy shaken noise. */
+  percTone: number
+  /** How often a hit is a slow brushed swell instead of a short one, 0 to 1. */
+  percSwell: number
+
   /** Chance a given section drops one or more voices, 0 to 1. */
   dropoutChance: number
   /** Seconds a section lasts before the dropout dice are rolled again. */
@@ -103,6 +112,11 @@ export const BASE: MusicParams = {
   padFilterLfoSeconds: 37,
 
   bellRate: 4,
+
+  percGain: 0.45,
+  percRate: 9,
+  percTone: 0.55,
+  percSwell: 0.2,
 
   dropoutChance: 0.45,
   sectionSeconds: 75,

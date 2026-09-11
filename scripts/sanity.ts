@@ -11,7 +11,7 @@
  */
 
 import { World } from '../src/sim/world'
-import { config } from '../src/sim/config'
+import { config, configSnapshot, restoreConfig } from '../src/sim/config'
 import type { InputState } from '../src/input/keys'
 
 const HZ = 240
@@ -22,7 +22,7 @@ const NONE: InputState = { left: false, right: false, reelIn: false, reelOut: fa
 const PULL: InputState = { left: true, right: true, reelIn: false, reelOut: false }
 const REEL_OUT: InputState = { left: false, right: false, reelIn: false, reelOut: true }
 
-const DEFAULTS = structuredClone(config)
+const DEFAULTS = configSnapshot()
 
 interface Sample {
   altitude: number
@@ -68,8 +68,10 @@ function check(name: string, condition: boolean, detail: string): void {
 }
 
 function scenario(name: string, body: () => void): void {
-  // Each scenario tunes the config, so restore defaults before the next one.
-  Object.assign(config, structuredClone(DEFAULTS))
+  // Each scenario tunes the config, so restore defaults before the next one. Through
+  // the helper, because a plain assign would replace the `kite` alias with a detached
+  // copy and every slider path would then write somewhere the simulation cannot see.
+  restoreConfig(DEFAULTS)
   console.log(`\n${name}`)
   body()
 }

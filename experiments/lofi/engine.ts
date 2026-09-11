@@ -17,11 +17,13 @@
 import { mulberry32 } from '../../src/core/rng'
 import { shapeAt, type Shape } from './drift'
 import { createChain, type Chain } from './fx'
-import { chordsOf, DEFAULT_MOTION, nextChord, voiceBass, voiceBells, voicePad, type Chord } from './harmony'
+import { chordsOf, DEFAULT_MOTION, nextChord, voiceBass, voiceBells, voicePad, voicePerc,
+  type Chord } from './harmony'
 import type { MusicParams } from './params'
 import { playBass } from './voices/bass'
 import { playBell } from './voices/bell'
 import { playPad } from './voices/pad'
+import { playPerc } from './voices/perc'
 
 /** How far ahead events are queued, and how often the queue is topped up. */
 const LOOKAHEAD = 4
@@ -190,6 +192,7 @@ export class MusicEngine {
     const pad = voicePad(chord, params, shape, duration, this.rng)
     const bass = voiceBass(chord, params, duration)
     const bells = voiceBells(chord, params, shape, duration, this.rng)
+    const perc = voicePerc(chord, params, shape, duration, this.rng)
     const audible = this.cursor + duration > elapsed
 
     if (audible) {
@@ -197,12 +200,14 @@ export class MusicEngine {
       for (const event of pad) playPad(this.ctx, event, chain, params, startAt)
       if (shape.bass > 0) playBass(this.ctx, bass, chain, params, shape, startAt)
       if (shape.bells > 0) for (const event of bells) playBell(this.ctx, event, chain, shape, startAt)
+      if (shape.perc > 0) for (const event of perc) playPerc(this.ctx, event, chain, startAt)
 
       this.onChord?.({
         chord: chord.name,
         section: shape.section,
         seconds: duration,
-        notes: pad.length + (shape.bass > 0 ? 1 : 0) + (shape.bells > 0 ? bells.length : 0),
+        notes: pad.length + (shape.bass > 0 ? 1 : 0) + (shape.bells > 0 ? bells.length : 0) +
+          (shape.perc > 0 ? perc.length : 0),
       })
     }
 

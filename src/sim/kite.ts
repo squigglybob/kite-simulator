@@ -8,7 +8,7 @@ import {
   sideslipLiftFactor,
 } from './aero'
 import { solveLine, type LineState } from './line'
-import { lateralGustGradient, windAt } from './wind'
+import { windAt } from './wind'
 import {
   add,
   addScaledInPlace,
@@ -214,56 +214,182 @@ export class Kite {
     const apparent = sub(wind, this.vel)
     const airspeed = length(apparent)
     const line = solveLine(this.pos, handPos, this.vel)
-    const q = dynamicPressure(airspeed)
 
-    // --- Angle of attack, measured rather than steered -------------------------
+    // --- The sail, as two panels ---------------------------------------------------
+    // Not one flat plate but two, hinged along the spine and tilted up out of the flat
+    // by the dihedral angle. This is the difference between a kite that can right
+    // itself and one that cannot.
+    //
+    // A single plate makes one force at one point *on the spine*, and the cross
+    // product of a spine offset with any force has no spine component — so a flat
+    // plate produces mathematically zero roll torque, at every angle, always. No
+    // amount of tuning reaches that, because it is a property of the geometry rather
+    // than of the numbers. Two panels sit half a span apart, so their forces differ
+    // and the difference is a real rolling moment.
+    //
+    // Three things then fall out for free that used to be faked or missing:
+    //
+    // - **Dihedral effect.** Slide the kite sideways and the windward panel meets the
+    //   air more squarely than the leeward one. It makes more lift, and the kite rolls
+    //   back upright. This is what a bowed cross spar is *for*.
+    // - **Roll and yaw damping**, because each panel's local airflow includes the
+    //   velocity its own offset picks up from the kite's rotation. Rotating drives a
+    //   flow difference across the two panels that opposes the rotation.
+    // - **Gust roll**, because the wind is sampled at each panel's own centre. A gust
+    //   that catches one wingtip harder really does hit one panel harder. That used to
+    //   be a hand-applied torque with its own gain, which is now gone.
+    const dihedral = k.dihedralDeg * DEG
+    const cosD = Math.cos(dihedral)
+    const sinD = Math.sin(dihedral)
+    const halfSpan = size.span * 0.5
+    /** Centroid of a half of the sail, a quarter span out from the spine. */
+    const panelArm = halfSpan * 0.5
+
     let windDir = v3(0, 0, 1)
     let alpha = 0
+    let alignment = 1
     let lift = v3()
     let drag = v3()
-    /** Cosine of the sideslip angle. 1 is flying straight down its own spine. */
-    let alignment = 1
 
-    if (airspeed > 0.05) {
-      windDir = scale(apparent, 1 / airspeed)
-      // `normal` is the leeward face — the side lift pulls toward — so the flow has a
-      // positive component along it at positive incidence.
-      alpha = Math.asin(Math.max(-1, Math.min(1, dot(windDir, this.normal))))
+    const aero = v3()
+    const torque = v3()
 
-      // How much of the air is running down the spine rather than across the span.
-      // Kept as squares rather than an angle: it needs no sign, and it needs no
-      // normalising of an in-plane flow vector that vanishes when the air comes
-      // square to the sail — where, rightly, there is no sideslip to speak of, since
-      // a barn door is a barn door whichever way round you hold it.
-      const chordwise = dot(apparent, this.nose)
-      const spanwise = dot(apparent, this.span)
+    for (const side of [-1, 1]) {
+      // The panel's own face. Both tilt toward the centreline, so the sail forms a
+      // shallow V opening downwind — wingtips forward of the spine, as a bow bends.
+      const panelNormal = normalize(
+        add(scale(this.normal, cosD), scale(this.span, -side * sinD)),
+      )
+      // and its own spanwise axis, which the dihedral tilts with it. Note the order:
+      // `span` is `nose x normal`, so taking the cross the other way round puts every
+      // panel on the wrong side of the kite and silently inverts the dihedral.
+      const panelSpan = cross(this.nose, panelNormal)
+
+      // Where this panel acts, and what the air is doing there. Both the wind sample
+      // and the rotational velocity are taken at the panel, not at the centre — that
+      // is the whole source of the roll behaviour.
+      const arm = scale(panelSpan, side * panelArm)
+      const at = add(this.pos, arm)
+      const panelWind = windAt(at, time)
+      const panelVel = add(this.vel, cross(this.spin, arm))
+      const flow = sub(panelWind, panelVel)
+      const speed = length(flow)
+      if (speed <= 0.05) continue
+
+      const flowDir = scale(flow, 1 / speed)
+      // `panelNormal` is the leeward face, so the flow has a positive component along
+      // it at positive incidence.
+      const panelAlpha = Math.asin(
+        Math.max(-1, Math.min(1, dot(flowDir, panelNormal))),
+      )
+
+      // Sideslip, per panel. Kept as squares rather than an angle: it needs no sign,
+      // and no normalising of an in-plane flow vector that vanishes when the air comes
+      // square to the sail — where, rightly, there is no sideslip to speak of, since a
+      // barn door is a barn door whichever way round you hold it.
+      const chordwise = dot(flow, this.nose)
+      const spanwise = dot(flow, panelSpan)
       const inPlaneSq = chordwise * chordwise + spanwise * spanwise
-      alignment =
+      const panelAlign =
         inPlaneSq > 1e-6 ? Math.sqrt((chordwise * chordwise) / inPlaneSq) : 1
 
-      // Lift acts square to the airflow, on the side the leeward face looks toward,
-      // and only to the extent the kite is pointing where the air is coming from.
-      const perpendicular = sub(this.normal, scale(windDir, dot(this.normal, windDir)))
+      // Half the area each, so the two together are the kite the config describes.
+      const panelQ = dynamicPressure(speed, config.kite.area * 0.5)
+
+      const panelLift = v3()
+      const perpendicular = sub(
+        panelNormal,
+        scale(flowDir, dot(panelNormal, flowDir)),
+      )
       const perpLength = length(perpendicular)
       if (perpLength > 1e-4) {
-        lift = scale(
+        addScaledInPlace(
+          panelLift,
           perpendicular,
-          (q * liftCoefficient(alpha) * k.clScale * sideslipLiftFactor(alignment)) /
+          (panelQ *
+            liftCoefficient(panelAlpha) *
+            k.clScale *
+            sideslipLiftFactor(panelAlign)) /
             perpLength,
         )
       }
-
-      const lineDragArea = config.line.length * config.line.dragPerMetre
-      const lineDrag = 0.5 * config.env.airDensity * airspeed * airspeed * lineDragArea
-      drag = scale(
-        windDir,
-        q *
-          (dragCoefficient(alpha) * k.cdScale + sideslipDragCoefficient(alignment)) +
-          lineDrag,
+      const panelDrag = scale(
+        flowDir,
+        panelQ *
+          (dragCoefficient(panelAlpha) * k.cdScale +
+            sideslipDragCoefficient(panelAlign)),
       )
+      const panelForce = add(panelLift, panelDrag)
+      lift = add(lift, panelLift)
+      drag = add(drag, panelDrag)
+
+      // The centre of pressure slides toward the *trailing* edge as incidence rises,
+      // which on a kite is the tail, so `cpSlope` is negative. Because the line is
+      // anchored at a fixed point, that travel is what restores pitch: too much
+      // incidence walks the pressure behind the tow point and the nose comes back down.
+      const cpAlong = (k.cpBase + k.cpSlope * Math.sin(panelAlpha)) * size.spine
+      addScaledInPlace(arm, this.nose, cpAlong)
+
+      addScaledInPlace(torque, cross(arm, panelForce), 1)
+
+      // Diagnostics are the mean of the two panels, which for a kite flying straight
+      // is what a single-plate model would have reported anyway.
+      windDir = flowDir
+      alpha += panelAlpha * 0.5
+      alignment += (panelAlign - 1) * 0.5
     }
 
-    const aero = add(lift, drag)
+    // --- The keel ------------------------------------------------------------------
+    // A flat plate facing sideways, hung below and behind the tow point. Edge-on to
+    // the airflow in straight flight, so it costs almost nothing; the moment the kite
+    // slews across the flow it meets the air face-on, and because it is behind the
+    // centre of mass that force swings the nose back into the wind. It is what holds a
+    // tailless kite straight, and it is the reason a delta needs no tail.
+    if (k.keelArea > 0) {
+      const keelAt = add(
+        scale(this.nose, k.keelAlong * size.spine),
+        // Hangs off the windward face, which is the side away from the normal.
+        scale(this.normal, -k.keelDrop * size.spine),
+      )
+      const keelFlow = sub(
+        windAt(add(this.pos, keelAt), time),
+        add(this.vel, cross(this.spin, keelAt)),
+      )
+      const keelSpeed = length(keelFlow)
+      if (keelSpeed > 0.05) {
+        const keelDir = scale(keelFlow, 1 / keelSpeed)
+        // The fin's face looks along the span, so that is the axis its incidence is
+        // measured from.
+        const keelAlpha = Math.asin(
+          Math.max(-1, Math.min(1, dot(keelDir, this.span))),
+        )
+        const keelQ = dynamicPressure(keelSpeed, k.keelArea)
+        const keelForce = scale(keelDir, keelQ * dragCoefficient(keelAlpha))
+        const perp = sub(this.span, scale(keelDir, dot(this.span, keelDir)))
+        const perpLen = length(perp)
+        if (perpLen > 1e-4) {
+          addScaledInPlace(keelForce, perp, (keelQ * liftCoefficient(keelAlpha)) / perpLen)
+        }
+        lift = add(lift, keelForce)
+        addScaledInPlace(torque, cross(keelAt, keelForce), 1)
+      }
+    }
+
+    // Line drag acts on the line, not on either panel, so it is added once at the
+    // centre along the airflow the kite as a whole sees.
+    const apparentSpeed = length(apparent)
+    if (apparentSpeed > 0.05) {
+      const lineDragArea = config.line.length * config.line.dragPerMetre
+      drag = add(
+        drag,
+        scale(apparent, 0.5 * config.env.airDensity * apparentSpeed * lineDragArea),
+      )
+    }
+    const aeroTotal = add(lift, drag)
+    aero.x = aeroTotal.x
+    aero.y = aeroTotal.y
+    aero.z = aeroTotal.z
+
     const tensionForce = scale(line.dir, -line.tension)
 
     // --- Forces ------------------------------------------------------------------
@@ -271,13 +397,6 @@ export class Kite {
     force.y -= k.mass * config.env.gravity
 
     // --- Torques -------------------------------------------------------------------
-    // The centre of pressure slides toward the *trailing* edge as incidence rises,
-    // which on a kite is the tail, so `cpSlope` is negative. Because the line is
-    // anchored at a fixed point, that travel is what restores pitch: too much
-    // incidence walks the pressure behind the tow point and the nose comes back down.
-    const cpAlong = (k.cpBase + k.cpSlope * Math.sin(alpha)) * size.spine
-    const torque = cross(scale(this.nose, cpAlong), aero)
-
     const bridle = bridleGeometry()
     const towPoint = add(
       scale(this.nose, bridle.along * size.spine),
@@ -317,35 +436,28 @@ export class Kite {
       addScaledInPlace(torque, cross(tailAt, tailForce), 1)
     }
 
-    // The kite's own surface resists rotation: turning about the span sweeps the nose
-    // and tail through the air in opposite directions, and the pressure difference
-    // opposes the turn. This is a large moment for a flat plate and leaving it out is
-    // what let a well-trimmed kite slowly diverge in pitch and fall out of the sky.
-    // Like every other aerodynamic term it needs airflow, so it fades with airspeed.
+    // Pitch damping. Turning about the span sweeps the nose and tail through the air
+    // in opposite directions, and the pressure difference opposes the turn. Leaving
+    // it out is what let a well-trimmed kite slowly diverge in pitch and fall out of
+    // the sky. Like every other aerodynamic term it needs airflow, so it fades with
+    // airspeed.
+    //
+    // Only the span axis is damped here. Roll and yaw used to be damped alongside it,
+    // and are not any more: the two panels sit half a span apart and sample the air at
+    // their own centres, so a kite rotating about its spine or its face already drives
+    // a real flow difference between them that opposes the rotation. Damping those
+    // axes again by hand double-counted it, and it is precisely the roll-yaw swing
+    // that the panels exist to produce.
     if (airspeed > 0.05) {
+      const q = dynamicPressure(airspeed)
       const damp = (k.aeroDamping * q) / Math.max(airspeed, 0.5)
       const chord = size.spine * size.spine
-      const width = size.span * size.span
       addScaledInPlace(torque, this.span, -damp * chord * dot(this.spin, this.span))
-      addScaledInPlace(torque, this.nose, -damp * width * dot(this.spin, this.nose))
-      addScaledInPlace(
-        torque,
-        this.normal,
-        -damp * (chord + width) * dot(this.spin, this.normal),
-      )
     }
 
     // A trace of always-on damping, so a kite tumbling in dead air eventually settles
     // rather than spinning for ever.
     addScaledInPlace(torque, this.spin, -k.spinDamping)
-
-    // A gust that catches one wingtip harder than the other rolls the kite. The point
-    // force model cannot produce that on its own, so it is added directly.
-    addScaledInPlace(
-      torque,
-      this.nose,
-      lateralGustGradient(this.pos, time, size.span * 0.5) * k.rollGustGain * q,
-    )
 
     // --- Integrate -------------------------------------------------------------------
     // The tail's weight is applied as a force above, so its mass has to be in the

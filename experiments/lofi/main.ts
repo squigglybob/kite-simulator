@@ -45,6 +45,15 @@ const GROUPS: { title: string; faders: Fader[] }[] = [
     ],
   },
   {
+    title: 'Percussion',
+    faders: [
+      { key: 'percGain', label: 'level', min: 0, max: 1, step: 0.01 },
+      { key: 'percRate', label: 'hits per min', min: 0, max: 60, step: 1, later: true },
+      { key: 'percTone', label: 'wood / air', min: 0, max: 1, step: 0.02, later: true },
+      { key: 'percSwell', label: 'brush swells', min: 0, max: 1, step: 0.02, later: true },
+    ],
+  },
+  {
     title: 'Pad LFOs',
     faders: [
       { key: 'padLfoDepth', label: 'volume depth', min: 0, max: 0.9, step: 0.02 },

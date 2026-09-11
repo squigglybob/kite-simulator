@@ -39,6 +39,7 @@ export interface Shape {
   /** Voice multipliers. Zero means the voice has dropped out of this section. */
   bass: number
   bells: number
+  perc: number
   /** What the section is doing, for the console readout. */
   section: string
 }
@@ -65,6 +66,7 @@ interface Variant {
   pad: number
   bass: number
   bells: number
+  perc: number
   weight: number
   /**
    * Seconds of the section this lasts before everything returns. Infinity means it
@@ -81,10 +83,12 @@ interface Variant {
  * recedes far enough to let everything around it come forward, without going away.
  */
 const VARIANTS: Variant[] = [
-  { name: 'no bass', pad: 1, bass: 0, bells: 1, weight: 3, holdFor: Infinity },
-  { name: 'no bells', pad: 1, bass: 1, bells: 0, weight: 3, holdFor: Infinity },
-  { name: 'pad alone', pad: 1, bass: 0, bells: 0, weight: 3, holdFor: Infinity },
-  { name: 'hushed', pad: 0.4, bass: 0.35, bells: 0, weight: 2, holdFor: 40 },
+  { name: 'no bass', pad: 1, bass: 0, bells: 1, perc: 1, weight: 3, holdFor: Infinity },
+  { name: 'no bells', pad: 1, bass: 1, bells: 0, perc: 1, weight: 3, holdFor: Infinity },
+  { name: 'no perc', pad: 1, bass: 1, bells: 1, perc: 0, weight: 3, holdFor: Infinity },
+  { name: 'pad alone', pad: 1, bass: 0, bells: 0, perc: 0, weight: 3, holdFor: Infinity },
+  { name: 'pad and perc', pad: 1, bass: 0, bells: 0, perc: 1, weight: 2, holdFor: Infinity },
+  { name: 'hushed', pad: 0.4, bass: 0.35, bells: 0, perc: 0, weight: 2, holdFor: 40 },
 ]
 
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
@@ -138,6 +142,7 @@ export function shapeAt(t: number, params: MusicParams, seed: number): Shape {
     pad: dropped ? variant.pad : 1,
     bass: dropped ? variant.bass : 1,
     bells: dropped ? variant.bells : 1,
+    perc: dropped ? variant.perc : 1,
     section: dropped ? name : 'full',
   }
 }

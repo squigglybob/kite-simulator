@@ -92,6 +92,34 @@ export function kiteFrame(kite: Kite, view?: Vec3): Frame {
   return { normal: kite.normal, lit, nose: kite.nose, span: kite.span }
 }
 
+/**
+ * A point on the sail, given as a fraction along the spine and a signed fraction of
+ * the half span, placed in world space with the dihedral bend applied.
+ *
+ * The bend matches the physics: both tips are displaced toward the leeward face, so
+ * the sail is a shallow dish facing into the wind — which is exactly what tightening
+ * the bow line on a real cross spar does.
+ */
+function sailPoint(
+  centre: Vec3,
+  frame: Frame,
+  size: { spine: number; span: number },
+  alongSpine: number,
+  acrossSpan: number,
+): Vec3 {
+  const dihedral = config.kite.dihedralDeg * DEG
+  const out = Math.abs(acrossSpan) * size.span * 0.5
+  return add(
+    add(centre, scale(frame.nose, alongSpine * size.spine)),
+    add(
+      scale(frame.span, Math.sign(acrossSpan) * out * Math.cos(dihedral)),
+      scale(frame.normal, out * Math.sin(dihedral)),
+    ),
+  )
+}
+
+const DEG = Math.PI / 180
+
 function dimensions(): { spine: number; span: number } {
   // A kite quadrilateral of diagonals d1 and d2 has area d1*d2/2. Splitting that by the
   // aspect ratio keeps the area exactly what the physics is using at any proportion,
@@ -170,41 +198,82 @@ export class KiteRenderer {
     centre: Vec3,
   ): void {
     const view = viewTo(centre)
-    const { nose: noseDir, span, lit } = kiteFrame(kite, view)
+    const frame = kiteFrame(kite, view)
     const size = dimensions()
-
-    const nose = add(centre, scale(noseDir, size.spine * NOSE))
-    const tail = add(centre, scale(noseDir, size.spine * TAIL))
-    // The cross spar sits a quarter of the way down from the nose, which is what makes
-    // the outline a kite rather than a rhombus.
-    const sparOffset = scale(noseDir, size.spine * SPAR)
-    const left = add(add(centre, scale(span, -size.span * 0.5)), sparOffset)
-    const right = add(add(centre, scale(span, size.span * 0.5)), sparOffset)
-
-    const pNose = camera.project(nose)
-    const pTail = camera.project(tail)
-    const pLeft = camera.project(left)
-    const pRight = camera.project(right)
+    const at = (alongSpine: number, acrossSpan: number) =>
+      camera.project(sailPoint(centre, frame, size, alongSpine, acrossSpan))
 
     // Looking at the back of the kite gives a duller, shadowed face.
-    const facingAway = dot(view, lit) > 0
+    const facingAway = dot(view, frame.lit) > 0
     const body = facingAway ? C.kiteShade : C.kite
     const upper = facingAway ? C.kiteTrimShade : C.kiteTrim
 
+    const pNose = at(NOSE, 0)
+    const pTail = at(TAIL, 0)
+    const pLeft = at(SPAR, -1)
+    const pRight = at(SPAR, 1)
     const spanPx = Math.hypot(pRight.x - pLeft.x, pRight.y - pLeft.y)
+
+    if (config.kiteType === 'delta') {
+      // A delta is a swept triangle: the nose leads, the wingtips trail well behind
+      // it, and the trailing edge is cut away between them.
+      const tipL = at(TAIL, -1)
+      const tipR = at(TAIL, 1)
+      const notch = at(TAIL + 0.28, 0)
+      const tipSpan = Math.hypot(tipR.x - tipL.x, tipR.y - tipL.y)
+
+      this.drawTail(ctx, camera, notch, tipSpan)
+      // Each half filled on its own, so the fold along the spine reads as two tones
+      // and the dihedral is visible rather than implied.
+      fillPolygon(ctx, [pNose, tipL, notch], body)
+      fillPolygon(ctx, [pNose, tipR, notch], upper)
+      this.drawKeel(ctx, camera, frame, centre, size, facingAway, tipSpan)
+
+      if (tipSpan > 7) pixelLine(ctx, pNose.x, pNose.y, notch.x, notch.y, C.ink)
+      if (tipSpan > 12) pixelPath(ctx, [pNose, tipL, notch, tipR, pNose], C.ink)
+      return
+    }
+
     this.drawTail(ctx, camera, pTail, spanPx)
 
-    const outline: Point[] = [pNose, pLeft, pTail, pRight]
-    fillPolygon(ctx, outline, body)
-    fillPolygon(ctx, [pNose, pLeft, pRight], upper)
+    // The two halves again, each filled separately across the fold.
+    fillPolygon(ctx, [pNose, pLeft, pTail], body)
+    fillPolygon(ctx, [pNose, pRight, pTail], upper)
 
     if (spanPx > 7) {
       pixelLine(ctx, pNose.x, pNose.y, pTail.x, pTail.y, C.ink)
       pixelLine(ctx, pLeft.x, pLeft.y, pRight.x, pRight.y, C.ink)
     }
     if (spanPx > 12) {
-      pixelPath(ctx, [...outline, pNose], C.ink)
+      pixelPath(ctx, [pNose, pLeft, pTail, pRight, pNose], C.ink)
     }
+  }
+
+  /**
+   * The keel: the fin a delta hangs under its sail. Drawn on the windward side, which
+   * is the face away from the normal, so it reads as standing out toward the flyer.
+   */
+  private drawKeel(
+    ctx: CanvasRenderingContext2D,
+    camera: Camera,
+    frame: Frame,
+    centre: Vec3,
+    size: { spine: number; span: number },
+    facingAway: boolean,
+    spanPx: number,
+  ): void {
+    const k = config.kite
+    if (k.keelArea <= 0 || spanPx < 9) return
+    const drop = k.keelDrop * size.spine
+    const front = add(centre, scale(frame.nose, k.keelAlong * size.spine + size.spine * 0.3))
+    const back = add(centre, scale(frame.nose, k.keelAlong * size.spine - size.spine * 0.25))
+    const tip = add(
+      add(centre, scale(frame.nose, k.keelAlong * size.spine)),
+      scale(frame.normal, -drop),
+    )
+    const poly = [camera.project(front), camera.project(tip), camera.project(back)]
+    fillPolygon(ctx, poly, facingAway ? C.kiteTrimShade : C.kiteTrim)
+    if (spanPx > 14) pixelPath(ctx, [...poly, poly[0]], C.ink)
   }
 
   /**
@@ -223,15 +292,13 @@ export class KiteRenderer {
     centre: Vec3,
   ): void {
     const view = viewTo(centre)
-    const { nose: noseDir, span } = kiteFrame(kite, view)
+    const frame = kiteFrame(kite, view)
     const size = dimensions()
 
-    const sparOffset = scale(noseDir, size.spine * SPAR)
-    const inboard = size.span * BRIDLE_SPAN_FRACTION
     const anchors: Vec3[] = [
-      add(add(centre, scale(span, -inboard)), sparOffset),
-      add(add(centre, scale(span, inboard)), sparOffset),
-      add(centre, scale(noseDir, size.spine * LOWER_BRIDLE)),
+      sailPoint(centre, frame, size, SPAR, -BRIDLE_SPAN_FRACTION * 2),
+      sailPoint(centre, frame, size, SPAR, BRIDLE_SPAN_FRACTION * 2),
+      sailPoint(centre, frame, size, LOWER_BRIDLE, 0),
     ]
 
     const pLeft = camera.project(anchors[0])

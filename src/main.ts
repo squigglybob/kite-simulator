@@ -127,6 +127,9 @@ const panel = createTuningPanel({
       audio?.apply()
       settings.refresh()
     }
+    // The tail is a chain of points sized for the kite that was flying; a different
+    // kite has a different tail length and attachment, so let it rebuild.
+    if (path === 'kiteType') kiteRenderer.reset()
   },
 })
 

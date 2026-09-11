@@ -1,4 +1,4 @@
-import { config, type Config } from '../sim/config'
+import { config, configSnapshot, selectKite, type KiteType } from '../sim/config'
 import { availableMusicSources } from './settings'
 
 /**
@@ -71,6 +71,14 @@ const SECTIONS: Section[] = [
   {
     title: 'Kite',
     rows: [
+      {
+        path: 'kiteType',
+        label: 'kite',
+        options: [
+          { value: 'diamond', label: 'diamond (tailed)' },
+          { value: 'delta', label: 'delta (dihedral)' },
+        ],
+      },
       { path: 'kite.mass', label: 'mass kg', min: 0.05, max: 2, step: 0.01 },
       { path: 'kite.area', label: 'area m2', min: 0.1, max: 3, step: 0.05 },
       { path: 'kite.bridleUpper', label: 'bridle upper leg', min: 0.36, max: 0.66, step: 0.002 },
@@ -82,6 +90,10 @@ const SECTIONS: Section[] = [
       { path: 'kite.tailMassPerMetre', label: 'tail kg per m', min: 0, max: 0.08, step: 0.001 },
       { path: 'kite.aeroDamping', label: 'plate damping', min: 0, max: 2, step: 0.01 },
       { path: 'kite.spinDamping', label: 'spin damping', min: 0, max: 0.5, step: 0.005 },
+      { path: 'kite.dihedralDeg', label: 'dihedral deg', min: 0, max: 40, step: 0.5 },
+      { path: 'kite.keelArea', label: 'keel area m2', min: 0, max: 0.5, step: 0.005 },
+      { path: 'kite.keelAlong', label: 'keel along spine', min: -0.5, max: 0.2, step: 0.01 },
+      { path: 'kite.keelDrop', label: 'keel drop', min: 0, max: 0.6, step: 0.01 },
       { path: 'kite.sideslipLift', label: 'sideslip lift loss', min: 0, max: 1, step: 0.02 },
       { path: 'kite.sideslipDrag', label: 'sideslip drag', min: 0, max: 2.5, step: 0.05 },
       { path: 'kite.stallDeg', label: 'stall angle deg', min: 5, max: 40, step: 0.5 },
@@ -89,7 +101,6 @@ const SECTIONS: Section[] = [
       { path: 'kite.clScale', label: 'lift scale', min: 0, max: 3, step: 0.05 },
       { path: 'kite.cdScale', label: 'drag scale', min: 0, max: 3, step: 0.05 },
       { path: 'kite.cd0', label: 'parasitic drag', min: 0, max: 1, step: 0.005 },
-      { path: 'kite.rollGustGain', label: 'roll gust gain', min: 0, max: 0.2, step: 0.002 },
       { path: 'kite.visualScale', label: 'drawn size x', min: 1, max: 6, step: 0.1 },
       { path: 'kite.aspect', label: 'height / width', min: 0.8, max: 3, step: 0.05 },
       { path: 'kite.tailLength', label: 'tail length m', min: 0, max: 15, step: 0.25 },
@@ -160,6 +171,36 @@ const SECTIONS: Section[] = [
   },
 ]
 
+const PRESET_KEY = 'kite-flyer.presets'
+
+/**
+ * Named snapshots, one library per section.
+ *
+ * Scoped to a section rather than to the whole config on purpose: a good wind is a
+ * different thing from a good kite, and you want to try this kite in that weather
+ * without one choice dragging the other along. Saving "gusty onshore" under Wind and
+ * "floaty" under Kite lets them be mixed freely.
+ *
+ * A Kite snapshot also records which kite it was taken from, and loading it selects
+ * that kite first — otherwise a delta's numbers would land on whichever kite happened
+ * to be flying and quietly wreck it.
+ */
+type Snapshot = { values: Record<string, Value>; kiteType?: KiteType }
+type Library = Record<string, Record<string, Snapshot>>
+
+function readLibrary(): Library {
+  try {
+    const raw = localStorage.getItem(PRESET_KEY)
+    return raw ? (JSON.parse(raw) as Library) : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeLibrary(library: Library): void {
+  localStorage.setItem(PRESET_KEY, JSON.stringify(library))
+}
+
 type Nested = Record<string, unknown>
 type Value = number | boolean | string
 
@@ -228,6 +269,8 @@ export function loadSavedConfig(): void {
   if (!raw) return
   try {
     mergeInto(config as unknown as Nested, JSON.parse(raw) as Nested)
+    // The saved copy carries `kites` but not the `kite` alias, so repoint it.
+    selectKite(config.kiteType)
     validateSelects()
   } catch {
     localStorage.removeItem(STORAGE_KEY)
@@ -240,7 +283,7 @@ let saveTimer = 0
 export function saveConfig(): void {
   clearTimeout(saveTimer)
   saveTimer = window.setTimeout(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config satisfies Config))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configSnapshot()))
   }, 250)
 }
 
@@ -258,6 +301,103 @@ export interface TuningHooks {
   /** Walk the kite out and set it down ready to fly, keeping the score. */
   onSetUpForLaunch: () => void
   onChange?: (path: string) => void
+}
+
+/**
+ * The save / load strip that sits under each section's sliders: type a name and press
+ * Save to capture the section as it stands, or pick a saved name to put it back.
+ */
+function buildPresetRow(
+  section: Section,
+  values: Nested,
+  refreshers: (() => void)[],
+  hooks: TuningHooks,
+): HTMLElement {
+  const wrap = document.createElement('div')
+  wrap.className = 'presets'
+
+  const picker = document.createElement('select')
+  const name = document.createElement('input')
+  name.type = 'text'
+  name.placeholder = 'save as…'
+  const save = document.createElement('button')
+  save.textContent = 'Save'
+  const remove = document.createElement('button')
+  remove.textContent = '✕'
+  remove.title = 'Delete the selected snapshot'
+
+  /** Paths this section owns. `kiteType` is the selector, not a tunable, so skip it. */
+  const paths = section.rows.map((row) => row.path).filter((path) => path !== 'kiteType')
+
+  const refill = (selected = '') => {
+    const saved = readLibrary()[section.title] ?? {}
+    picker.replaceChildren()
+    const blank = document.createElement('option')
+    blank.value = ''
+    blank.textContent = Object.keys(saved).length ? 'load…' : '(none saved)'
+    picker.append(blank)
+    for (const key of Object.keys(saved).sort()) {
+      const option = document.createElement('option')
+      option.value = key
+      option.textContent = key
+      picker.append(option)
+    }
+    picker.value = selected
+    remove.disabled = !selected
+  }
+  refill()
+
+  save.addEventListener('click', () => {
+    const label = name.value.trim()
+    if (!label) {
+      name.focus()
+      return
+    }
+    const library = readLibrary()
+    const snapshot: Snapshot = { values: {} }
+    for (const path of paths) snapshot.values[path] = readPath(values, path) as Value
+    if (section.title === 'Kite') snapshot.kiteType = config.kiteType
+    library[section.title] = { ...library[section.title], [label]: snapshot }
+    writeLibrary(library)
+    name.value = ''
+    refill(label)
+    save.blur()
+  })
+
+  picker.addEventListener('change', () => {
+    const chosen = picker.value
+    if (!chosen) {
+      remove.disabled = true
+      return
+    }
+    const snapshot = readLibrary()[section.title]?.[chosen]
+    if (!snapshot) return
+    // Select the kite first, so the `kite.*` writes below land on the preset the
+    // snapshot was taken from rather than on whichever kite is currently flying.
+    if (snapshot.kiteType) selectKite(snapshot.kiteType)
+    for (const [path, value] of Object.entries(snapshot.values)) {
+      if (readPath(values, path) === undefined) continue // a field since renamed
+      writePath(values, path, value)
+    }
+    for (const sync of refreshers) sync()
+    hooks.onChange?.(section.title === 'Audio' ? 'audio.' : '')
+    saveConfig()
+    remove.disabled = false
+    picker.blur()
+  })
+
+  remove.addEventListener('click', () => {
+    const chosen = picker.value
+    if (!chosen) return
+    const library = readLibrary()
+    delete library[section.title]?.[chosen]
+    writeLibrary(library)
+    refill()
+    remove.blur()
+  })
+
+  wrap.append(picker, name, save, remove)
+  return wrap
 }
 
 export function createTuningPanel(hooks: TuningHooks): TuningPanel {
@@ -299,6 +439,17 @@ export function createTuningPanel(hooks: TuningHooks): TuningPanel {
       .tuning button:hover:not(:disabled) { background: #26303d; }
       .tuning button:disabled { opacity: 0.35; cursor: default; }
       .tuning .hint { color: #6b7a8a; margin-top: 10px; }
+      .tuning .presets {
+        display: flex; gap: 4px; margin: 2px 0 10px;
+        padding-top: 6px; border-top: 1px dashed #2b3440;
+      }
+      .tuning .presets select { flex: 1 1 auto; min-width: 0; margin: 0; }
+      .tuning .presets input {
+        flex: 1 1 auto; min-width: 0; padding: 2px 4px;
+        background: #1b222c; color: #d7e3ec;
+        border: 1px solid #3a4757; border-radius: 3px; font: inherit;
+      }
+      .tuning .presets button { flex: 0 0 auto; padding: 2px 7px; }
     </style>
   `
 
@@ -309,6 +460,12 @@ export function createTuningPanel(hooks: TuningHooks): TuningPanel {
   /** Writes through, tells the game, and persists. The one path every row takes. */
   const commit = (path: string, value: Value): void => {
     writePath(values, path, value)
+    // Changing kite repoints `config.kite` at a different preset, so every row bound
+    // to a `kite.*` path is now showing the old kite's number and has to resync.
+    if (path === 'kiteType') {
+      selectKite(value as KiteType)
+      for (const sync of refreshers) sync()
+    }
     hooks.onChange?.(path)
     saveConfig()
   }
@@ -404,6 +561,8 @@ export function createTuningPanel(hooks: TuningHooks): TuningPanel {
 
       root.append(label)
     }
+
+    root.append(buildPresetRow(section, values, refreshers, hooks))
   }
 
   const actions = document.createElement('div')

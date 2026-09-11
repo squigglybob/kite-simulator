@@ -35,12 +35,17 @@ const SOFT_CLIP_KNEE = 0.8
 const BASS_SEND_SHARE = 0.2
 /** Sparse high notes are where a long tail earns its keep. */
 const BELL_SEND_SHARE = 1.4
+/** Percussion wants some room, but a wash of tails turns texture into mush. */
+const PERC_SEND_SHARE = 0.6
 
 export interface Chain {
   /** Voices connect here. One bus each, so a level change is immediate. */
   readonly pad: GainNode
   readonly bass: GainNode
   readonly bell: GainNode
+  readonly perc: GainNode
+  /** Shared with the percussion voice, so it is generated once rather than per hit. */
+  readonly noise: AudioBuffer
   /** Connect to an oscillator's `detune` to put it on tape. */
   readonly wow: GainNode
   setGain(value: number, when: number, timeConstant?: number): void
@@ -180,6 +185,7 @@ export function createChain(
   }
   const bass = voice()
   const bell = voice()
+  const perc = voice()
 
   // The pad's filter sits on its bus rather than on each note. Every note of a chord
   // was being given the same corner anyway, so this is fewer nodes for the same sound —
@@ -252,8 +258,10 @@ export function createChain(
     depths.push(depth)
   }
 
+  const noise = noiseLoop(ctx, seed + 2)
+
   const hissSource = ctx.createBufferSource()
-  hissSource.buffer = noiseLoop(ctx, seed + 2)
+  hissSource.buffer = noise
   hissSource.loop = true
   const hissBand = ctx.createBiquadFilter()
   hissBand.type = 'highpass'
@@ -273,6 +281,8 @@ export function createChain(
     pad: pad.bus,
     bass: bass.bus,
     bell: bell.bus,
+    perc: perc.bus,
+    noise,
     wow,
     setGain(value, when, timeConstant = 0.4) {
       master.gain.cancelScheduledValues(when)
@@ -282,11 +292,13 @@ export function createChain(
       glide(pad.bus.gain, next.padGain)
       glide(bass.bus.gain, next.bassGain)
       glide(bell.bus.gain, next.bellGain)
+      glide(perc.bus.gain, next.percGain)
     },
     setReverb(amount) {
       glide(pad.send.gain, amount)
       glide(bass.send.gain, amount * BASS_SEND_SHARE)
       glide(bell.send.gain, Math.min(1, amount * BELL_SEND_SHARE))
+      glide(perc.send.gain, amount * PERC_SEND_SHARE)
     },
     setPadCutoff(hz) {
       cutoffCentre = Math.max(60, hz)

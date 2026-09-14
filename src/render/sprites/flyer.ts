@@ -25,10 +25,20 @@ export interface FlyerPose {
    * the two can never disagree.
    */
   hand: Point
+  /**
+   * On a two-line kite, each hand separately: the projected position of that hand in
+   * the simulation, screen-left first. Each arm then reaches its own hand rather than
+   * both straddling one grip, and because these are the very points the two flying
+   * lines are drawn from, the hands are physically tied to the ends of the strings
+   * instead of merely near them.
+   */
+  hands?: [Point, Point] | undefined
   /** Screen-space direction from the hands to the kite, radians. */
   stringAngle: number
   /** Line tension as a fraction of a hard brace, 0 to 1. Extends the arms. */
   tension: number
+  /** Per-arm version of the same, screen-left first, for a line in each hand. */
+  raise?: [number, number] | undefined
   /** Backward body lean, radians. Driven by line tension. */
   lean: number
 }
@@ -110,11 +120,12 @@ export function drawFlyer(ctx: CanvasRenderingContext2D, pose: FlyerPose): Point
   const raise = pose.tension * ELBOW_RAISE
 
   const hands: Point[] = []
-  for (const side of [-1, 1]) {
+  for (const [index, side] of [-1, 1].entries()) {
     const shoulder: Point = {
       x: shoulderMid.x + side * shoulderHalf,
       y: shoulderMid.y,
     }
+    const own = pose.hands?.[index]
 
     const hanging: Point = {
       x: pose.feetX + side * shoulderHalf * ELBOW_FLARE,
@@ -122,17 +133,29 @@ export function drawFlyer(ctx: CanvasRenderingContext2D, pose: FlyerPose): Point
     }
     // Loading the line lifts the arms mostly upward — the sideways component is
     // damped, or both elbows swing out together and it reads as pointing, not bracing.
-    const reaching: Point = {
-      x: shoulder.x + aim.x * upper * 0.35,
-      y: shoulder.y + aim.y * upper,
+    // With a line each, the arms work independently: each elbow swings toward the
+    // hand that arm is actually holding, so a one-handed tug moves one arm.
+    let reach = aim
+    if (own) {
+      const dx = own.x - shoulder.x
+      const dy = own.y - shoulder.y
+      const len = Math.hypot(dx, dy)
+      if (len > 1e-3) reach = { x: dx / len, y: dy / len }
     }
+    const reaching: Point = {
+      x: shoulder.x + reach.x * upper * 0.35,
+      y: shoulder.y + reach.y * upper,
+    }
+    const sideRaise = pose.raise?.[index] ?? raise
     const elbow: Point = {
-      x: hanging.x + (reaching.x - hanging.x) * raise,
-      y: hanging.y + (reaching.y - hanging.y) * raise,
+      x: hanging.x + (reaching.x - hanging.x) * sideRaise,
+      y: hanging.y + (reaching.y - hanging.y) * sideRaise,
     }
 
-    // Both hands are on the one line, so they straddle the simulated grip.
-    const hand: Point = {
+    // On one line both hands are on the same string, so they straddle the grip. On
+    // two, each hand is exactly where the simulation put it — which is exactly where
+    // its string is drawn from.
+    const hand: Point = own ?? {
       x: pose.hand.x + side * h * HAND_HALF_WIDTH,
       y: pose.hand.y,
     }

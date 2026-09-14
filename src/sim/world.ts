@@ -73,6 +73,12 @@ export class World {
     }
 
     this.flyer.step(dt, input, this.kite.diag.line.dir)
+    // A kite stood up for launch waits for both hands. One hand is the steering
+    // input, so it has to be both, and that is what launching one takes anyway.
+    if (this.kite.held && this.flyer.leftDraw > 0.6 && this.flyer.rightDraw > 0.6) {
+      this.kite.release()
+    }
+
     this.kite.step(
       dt,
       {

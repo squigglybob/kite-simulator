@@ -309,11 +309,24 @@ function render(alpha: number, frameTime: number): void {
   const handScreen = camera.project(world.flyer.handPos)
   const stringAngle = Math.atan2(towScreen.y - handScreen.y, towScreen.x - handScreen.x)
 
+  // With a line in each hand, hand the rig both grips so the arms work independently
+  // and each one ends exactly where its string is drawn from.
+  const leftScreen = camera.project(world.flyer.leftHand)
+  const rightScreen = camera.project(world.flyer.rightHand)
+  const perHandRaise = Math.min(kite.diag.lineLeft.tension / BRACE_TENSION, 1)
+  const perHandRaiseR = Math.min(kite.diag.lineRight.tension / BRACE_TENSION, 1)
+
   drawFlyer(ctx, {
     feetX: BASE_W / 2,
     feetY: FEET_Y,
     heightPx,
     hand: handScreen,
+    hands: pair ? [leftScreen, rightScreen] : undefined,
+    raise: pair
+      ? config.kite.steerInvert
+        ? [perHandRaiseR, perHandRaise]
+        : [perHandRaise, perHandRaiseR]
+      : undefined,
     stringAngle,
     tension: tensionFraction,
     // Tilt away from any sideways pull; a centred kite pulls straight back instead.

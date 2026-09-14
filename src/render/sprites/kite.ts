@@ -276,7 +276,8 @@ export class KiteRenderer {
       // A sport kite is cut back much harder than a single-line delta — the sail is
       // little more than two swept leading edges and a deep notch — which is most of
       // why the two do not look alike even at the same span.
-      const notchDepth = config.kiteType === 'stunt' ? 0.5 : 0.28
+      const sport = config.kiteType === 'stunt' || config.kiteType === 'swept'
+      const notchDepth = sport ? 0.5 : 0.28
       const tipL = at(TAIL, -1)
       const tipR = at(TAIL, 1)
       const notch = at(TAIL + notchDepth, 0)
@@ -293,7 +294,7 @@ export class KiteRenderer {
       if (tipSpan > 12) pixelPath(ctx, [pNose, tipL, notch, tipR, pNose], C.ink)
       // The spreader, bracing the two leading edges apart. On a sport kite it is the
       // most visible spar there is, and it reads even at a few pixels.
-      if (config.kiteType === 'stunt' && tipSpan > 14) {
+      if (sport && tipSpan > 14) {
         const sL = at(SPAR - 0.1, -0.55)
         const sR = at(SPAR - 0.1, 0.55)
         pixelLine(ctx, sL.x, sL.y, sR.x, sR.y, C.ink)

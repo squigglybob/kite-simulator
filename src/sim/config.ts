@@ -13,7 +13,7 @@
 export type MusicSource = 'off' | 'generated' | 'tracks'
 
 /** The kites you can put on the line. */
-export type KiteType = 'diamond' | 'delta' | 'stunt'
+export type KiteType = 'diamond' | 'delta' | 'stunt' | 'swept'
 
 /**
  * One kite's numbers. Every kite carries its own full set, so tuning the delta cannot
@@ -158,6 +158,14 @@ export interface KiteParams {
    * it false shows the underlying behaviour unaltered.
    */
   steerInvert: boolean
+  /**
+   * Leading-edge vortex lift, as the coefficient on Polhamus's sin-squared term. Zero
+   * uses the flat-plate curve with its hard stall; a swept sail wants 2 to 3.5, which
+   * carries lift past forty degrees of incidence instead of collapsing at sixteen.
+   * `stallDeg` and `stallBlendDeg` are unused when this is on — the curve peaks and
+   * falls on its own.
+   */
+  vortexLift: number
   /** Angle of attack at which lift collapses, degrees. */
   stallDeg: number
   /** Degrees over which the stall blends in. */
@@ -361,6 +369,7 @@ export const config: Config = {
       towSpread: 0.4,
       towStandoff: 0.35,
       steerInvert: false,
+      vortexLift: 0,
     },
     delta: {
       mass: 0.3,
@@ -394,6 +403,7 @@ export const config: Config = {
       towSpread: 0.4,
       towStandoff: 0.35,
       steerInvert: false,
+      vortexLift: 0,
       stallDeg: 18,
       stallBlendDeg: 9,
       clScale: 1,
@@ -435,6 +445,49 @@ export const config: Config = {
       towSpread: 0.4,
       towStandoff: 0.18,
       steerInvert: true,
+      vortexLift: 0,
+      stallDeg: 18,
+      stallBlendDeg: 9,
+      clScale: 1,
+      cdScale: 1,
+      cd0: 0.08,
+      visualScale: 2.2,
+      aspect: 0.6,
+      tailLength: 0,
+    },
+    swept: {
+      mass: 0.28,
+      area: 0.8,
+      bridleUpper: 0.467,
+      // Well forward of the diamond's, which puts the tow point *above* the centre of
+      // mass rather than below it. That is what a kite with little tail needs: hung
+      // from a point below its centre it wants to flip nose-down, and only a heavy
+      // tail holds it up. Swept headlessly — at the diamond's 0.413 this kite does not
+      // survive a single wind speed, and from about 0.62 it flies at all of them.
+      bridleLower: 0.64,
+      cpBase: -0.16,
+      cpSlope: -0.3,
+      tailDrag: 0.002,
+      tailArm: 1.2,
+      tailMassPerMetre: 0.04,
+      aeroDamping: 0.22,
+      spinDamping: 0.02,
+      sideslipLift: 0.9,
+      sideslipDrag: 0.7,
+      dihedralDeg: 10,
+      keelFore: 0.3,
+      keelAft: -0.3,
+      keelApex: 0.1,
+      keelDrop: 0.16,
+      keelTow: 0.2,
+      dualLine: true,
+      bridleAftAlong: -0.383,
+      bridleForeAlong: 0.167,
+      towAlong: -0.44,
+      towSpread: 0.4,
+      towStandoff: 0.22,
+      steerInvert: false,
+      vortexLift: 2,
       stallDeg: 18,
       stallBlendDeg: 9,
       clScale: 1,

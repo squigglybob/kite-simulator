@@ -77,7 +77,8 @@ const SECTIONS: Section[] = [
         options: [
           { value: 'diamond', label: 'diamond (tailed)' },
           { value: 'delta', label: 'delta (dihedral)' },
-          { value: 'stunt', label: 'stunt delta (2 line)' },
+          { value: 'stunt', label: 'stunt delta flatwing (2 line)' },
+          { value: 'swept', label: 'stunt delta swept (2 line)' },
         ],
       },
       { path: 'kite.mass', label: 'mass kg', min: 0.05, max: 2, step: 0.01 },
@@ -92,6 +93,7 @@ const SECTIONS: Section[] = [
       { path: 'kite.aeroDamping', label: 'plate damping', min: 0, max: 2, step: 0.01 },
       { path: 'kite.spinDamping', label: 'spin damping', min: 0, max: 0.5, step: 0.005 },
       { path: 'kite.dihedralDeg', label: 'dihedral deg', min: 0, max: 40, step: 0.5 },
+      { path: 'kite.vortexLift', label: 'vortex lift', min: 0, max: 4, step: 0.05 },
       { path: 'kite.steerInvert', label: '2-line cross lines' },
       { path: 'kite.towAlong', label: '2-line tow along', min: -0.4, max: 0.4, step: 0.01 },
       { path: 'kite.towSpread', label: '2-line tow spread', min: 0.1, max: 1, step: 0.02 },

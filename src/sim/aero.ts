@@ -17,6 +17,29 @@ const DEG = Math.PI / 180
 export function liftCoefficient(alpha: number): number {
   const a = Math.abs(alpha)
   const sign = Math.sign(alpha)
+
+  // A swept kite does not stall the way a flat plate does. Air spilling over a highly
+  // swept leading edge rolls up into a vortex that sits on top of the sail and sucks
+  // it upward, and that suction keeps growing long after an unswept plate has given
+  // up — which is why a delta airliner can hold its nose thirty degrees up on
+  // approach. Polhamus's leading-edge suction analogy adds it as a second term in
+  // sin^2, and the sum peaks somewhere past forty degrees instead of falling off a
+  // cliff at sixteen.
+  //
+  // This is not a detail. A kite's tug only turns it toward the hand you pulled when
+  // the flyer is on the *tail* side of the sail, and the crossover is exactly where
+  // angle of attack plus elevation reaches ninety degrees. A flat plate stalls before
+  // it can get there and mushes; a swept sail can fly there, and steers the right way
+  // round when it does.
+  const kv = config.kite.vortexLift
+  if (kv > 0) {
+    const s = Math.sin(a)
+    const c = Math.cos(a)
+    // The first term is the ordinary attached lift, written so it still comes to
+    // 2*pi*alpha for small angles and so matches the flat plate near zero.
+    return sign * (2 * Math.PI * s * c * c + kv * s * s * c)
+  }
+
   const stall = config.kite.stallDeg * DEG
   const attached = 2 * Math.PI * a
 

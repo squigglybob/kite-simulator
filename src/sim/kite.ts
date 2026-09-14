@@ -52,8 +52,6 @@ import {
 const DEG = Math.PI / 180
 const WORLD_UP: Vec3 = { x: 0, y: 1, z: 0 }
 const GROUND_Y = 0.15
-/** How far the kite is propped back when set down ready to launch. */
-const LAUNCH_TILT = 38 * DEG
 /** Backstops. Nothing physical should approach either. */
 const MAX_SPEED = 90
 const MAX_SPIN = 40
@@ -185,14 +183,17 @@ export class Kite {
    * off the ground.
    */
   placeForLaunch(handPos: Vec3): void {
+    this.held = true
     const reach = config.line.length * 0.98
     const air = windAt(v3(handPos.x, 2, handPos.z + 5), 0)
     let downwind = v3(air.x, 0, air.z)
     downwind = length(downwind) > 1e-3 ? normalize(downwind) : v3(0, 0, 1)
 
+    const size = this.dimensions()
     this.pos = v3(
       handPos.x + downwind.x * reach,
-      GROUND_Y + 0.01,
+      // Stood on its tail rather than laid flat, so it is already the right way up.
+      GROUND_Y + size.spine * 0.5,
       handPos.z + downwind.z * reach,
     )
     this.prevPos = copy(this.pos)
@@ -200,15 +201,30 @@ export class Kite {
     this.spin = v3()
     this.crashed = false
 
-    const flow = normalize(windAt(this.pos, 0))
-    this.span = normalize(cross(WORLD_UP, flow))
-    const lift = normalize(cross(flow, this.span))
-    this.normal = normalize(
-      add(scale(lift, Math.cos(LAUNCH_TILT)), scale(flow, Math.sin(LAUNCH_TILT))),
-    )
-    this.nose = cross(this.normal, this.span)
+    // Nose straight at the zenith, face square to the wind: the stance you set a kite
+    // in before you walk back to the handles. The span is level and across the
+    // breeze, so the sail is presented rather than edge-on.
+    this.nose = v3(0, 1, 0)
+    this.span = normalize(cross(WORLD_UP, downwind))
+    this.normal = normalize(cross(this.span, this.nose))
     this.orthonormalise()
   }
+
+  /**
+   * Let go of a kite that was stood up for launch. Both hands, because that is what
+   * launching one actually takes, and because a single hand is the steering input.
+   */
+  release(): void {
+    this.held = false
+  }
+
+  /**
+   * True while the kite is stood up waiting to be launched. Nothing acts on it in
+   * this state — not gravity, not the wind — so it keeps its stance however hard it
+   * is blowing, and the flight begins when the flyer decides it does rather than
+   * whenever a gust happens to catch the sail.
+   */
+  held = false
 
   /** Removes the drift that integrating three axes separately accumulates. */
   private orthonormalise(): void {
@@ -229,6 +245,37 @@ export class Kite {
     this.prevPos = copy(this.pos)
 
     const size = this.dimensions()
+
+    if (this.held) {
+      // Parked. The line is still solved, so the string, the sag and the tension
+      // gauge all read correctly while the flyer walks back and takes up the slack —
+      // but no force is integrated, so the wind cannot blow it over or drag it away.
+      this.vel = v3()
+      this.spin = v3()
+      const parked = solveLine(this.pos, handPos, this.vel)
+      const rel = sub(this.pos, handPos)
+      const d = this.diag
+      d.line = parked
+      d.lineLeft = parked
+      d.lineRight = parked
+      d.airspeed = 0
+      d.alpha = 0
+      d.alignment = 1
+      d.lift = v3()
+      d.drag = v3()
+      d.tensionForce = v3()
+      d.normal = this.normal
+      d.nose = this.nose
+      d.span = this.span
+      d.elevation = Math.asin(
+        Math.max(-1, Math.min(1, rel.y / Math.max(parked.distance, 1e-4))),
+      )
+      d.azimuth = Math.atan2(rel.x, rel.z)
+      d.roll = Math.asin(Math.max(-1, Math.min(1, dot(this.span, WORLD_UP))))
+      d.stalled = false
+      return
+    }
+
     const wind = windAt(this.pos, time)
     const apparent = sub(wind, this.vel)
     const airspeed = length(apparent)
